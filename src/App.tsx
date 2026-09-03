@@ -11,6 +11,7 @@ import {
   getNextMonthlyDate,
   addDaysToDate,
   addMonthsToDate,
+  rememberTaskAsTemplate,
 } from "./services/storage";
 import {
   subscribeToTasksFirestore,
@@ -317,6 +318,8 @@ export function App() {
         enqueueSaveLog(logItem);
       }
     }
+
+    rememberTaskAsTemplate(savedTaskObj);
 
     const currentLogs = getStoredLogs();
     setLogs(currentLogs);

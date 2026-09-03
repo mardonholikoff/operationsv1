@@ -3,6 +3,244 @@ import { Task, TaskStep, ActivityLog, TaskPriority, ScheduleType, DateMode } fro
 const STORAGE_KEY_TASKS = "vazifalar_tasks_v3";
 const STORAGE_KEY_LOGS = "vazifalar_activity_logs_v3";
 const STORAGE_KEY_LAST_SYNC = "vazifalar_last_sync_v3";
+const STORAGE_KEY_TEMPLATES_HISTORY = "vazifalar_templates_history_v3";
+
+export interface TaskTemplateItem {
+  id: string;
+  title: string;
+  steps: TaskStep[];
+  priority: TaskPriority;
+  scheduleType: ScheduleType;
+  dateMode?: DateMode;
+  monthlyDay?: number;
+  monthlyStartDay?: number;
+  monthlyEndDay?: number;
+  dueTime?: string;
+  estimatedDuration?: number;
+  categoryLabel?: string;
+}
+
+export const DEFAULT_BUILTIN_TEMPLATES: TaskTemplateItem[] = [
+  {
+    id: "builtin-tmpl-1",
+    title: "QQS hisobotini soliq.uz orqali topshirish",
+    priority: "Soliq(Muhim)",
+    scheduleType: "monthly",
+    dateMode: "single",
+    monthlyDay: 20,
+    dueTime: "10:00",
+    estimatedDuration: 60,
+    categoryLabel: "Soliq hisoboti",
+    steps: [
+      { id: "s1", text: "Elektron hisobvaraq-fakturalarni solishtirish va ro'yxatni tekshirish", completed: false, estimatedMinutes: 20 },
+      { id: "s2", text: "1C buxgalteriya tizimidan QQS reestrini eksport qilish", completed: false, estimatedMinutes: 15 },
+      { id: "s3", text: "my.soliq.uz kabinetiga hisobotni yuklash va qatorlarni tekshirish", completed: false, estimatedMinutes: 15 },
+      { id: "s4", text: "Hisobotni elektron imzo bilan tasdiqlash va jo'natish", completed: false, estimatedMinutes: 10 }
+    ]
+  },
+  {
+    id: "builtin-tmpl-2",
+    title: "Oylik daromad va ijtimoiy soliq (JShODS) hisoboti",
+    priority: "Soliq(Muhim)",
+    scheduleType: "monthly",
+    dateMode: "single",
+    monthlyDay: 15,
+    dueTime: "11:00",
+    estimatedDuration: 45,
+    categoryLabel: "Soliq hisoboti",
+    steps: [
+      { id: "s1", text: "Hisoblangan ish haqi qaydnomasi (raschyot vedomost)ni tekshirish", completed: false, estimatedMinutes: 15 },
+      { id: "s2", text: "JShODS va INPS badallarini shakllantirish", completed: false, estimatedMinutes: 15 },
+      { id: "s3", text: "Soliq portalida hisobotni tekshirish va tasdiqlash", completed: false, estimatedMinutes: 15 }
+    ]
+  },
+  {
+    id: "builtin-tmpl-3",
+    title: "Bank ko'chirmalari (vypiska) va to'lovlarni o'tkazish",
+    priority: "Ichki hisobot(Muhim)",
+    scheduleType: "daily",
+    dateMode: "single",
+    dueTime: "09:30",
+    estimatedDuration: 30,
+    categoryLabel: "Bank va moliya",
+    steps: [
+      { id: "s1", text: "Internet-banking tizimidan kunlik ko'chirmani yuklab olish", completed: false, estimatedMinutes: 10 },
+      { id: "s2", text: "1C dasturiga import qilish va provodkalarni tekshirish", completed: false, estimatedMinutes: 15 },
+      { id: "s3", text: "Rejalashtirilgan to'lov topshirig'i bo'yicha to'lovlarni jo'natish", completed: false, estimatedMinutes: 5 }
+    ]
+  },
+  {
+    id: "builtin-tmpl-4",
+    title: "Elektron hisobvaraq-fakturalarni (EHF) tekshirish va tasdiqlash",
+    priority: "Ichki hisobot(Muhim)",
+    scheduleType: "daily",
+    dateMode: "single",
+    dueTime: "14:00",
+    estimatedDuration: 25,
+    categoryLabel: "Hujjat aylanishi",
+    steps: [
+      { id: "s1", text: "Didox / Rouming tizimiga kirish va yangi EHF larni tekshirish", completed: false, estimatedMinutes: 10 },
+      { id: "s2", text: "Kirim hujjatlari bilan nomenklyatura va narxlarni solishtirish", completed: false, estimatedMinutes: 10 },
+      { id: "s3", text: "ERI kaliti bilan tasdiqlash yoki rad etish sababini yozish", completed: false, estimatedMinutes: 5 }
+    ]
+  },
+  {
+    id: "builtin-tmpl-5",
+    title: "Xodimlar oylik ish haqini hisoblash va to'lash",
+    priority: "Ichki hisobot(Muhim)",
+    scheduleType: "monthly",
+    dateMode: "single",
+    monthlyDay: 5,
+    dueTime: "11:30",
+    estimatedDuration: 50,
+    categoryLabel: "Ish haqi",
+    steps: [
+      { id: "s1", text: "Ish vaqti tabelini tekshirish va tasdiqlash", completed: false, estimatedMinutes: 15 },
+      { id: "s2", text: "1C da ish haqini to'liq hisoblash va vedomost chiqarish", completed: false, estimatedMinutes: 20 },
+      { id: "s3", text: "Bankka ish haqi reestrini jo'natish va to'lovni o'tkazish", completed: false, estimatedMinutes: 15 }
+    ]
+  },
+  {
+    id: "builtin-tmpl-6",
+    title: "Statistika hisobotini (1-BX shakli) topshirish",
+    priority: "Ichki hisobot(O'rtacha)",
+    scheduleType: "monthly",
+    dateMode: "single",
+    monthlyDay: 25,
+    dueTime: "15:00",
+    estimatedDuration: 40,
+    categoryLabel: "Statistika",
+    steps: [
+      { id: "s1", text: "Oylik statistika ko'rsatkichlarini jamlash", completed: false, estimatedMinutes: 15 },
+      { id: "s2", text: "stat.uz tizimiga kirib shaklni to'ldirish", completed: false, estimatedMinutes: 15 },
+      { id: "s3", text: "Hisobotni jo'natish va qabul qilingan kvitansiyasini saqlash", completed: false, estimatedMinutes: 10 }
+    ]
+  },
+  {
+    id: "builtin-tmpl-7",
+    title: "Kontragentlar bilan solishtirma dalolatnomalar (Akt sverki)",
+    priority: "Ichki hisobot(O'rtacha)",
+    scheduleType: "weekly",
+    dateMode: "single",
+    dueTime: "16:00",
+    estimatedDuration: 35,
+    categoryLabel: "Hisob-kitoblar",
+    steps: [
+      { id: "s1", text: "Asosiy mijoz va ta'minotchilar bo'yicha akt sverka chiqarish", completed: false, estimatedMinutes: 15 },
+      { id: "s2", text: "Elektron pochta yoki Didox orqali jo'natish", completed: false, estimatedMinutes: 10 },
+      { id: "s3", text: "Imzolangan javob aktlarini tekshirish va arxivga biriktirish", completed: false, estimatedMinutes: 10 }
+    ]
+  },
+  {
+    id: "builtin-tmpl-8",
+    title: "Ofis ijarasi va kommunal xizmatlar to'lovini amalga oshirish",
+    priority: "Takrorlanmas ish(Muhim)",
+    scheduleType: "monthly",
+    dateMode: "single",
+    monthlyDay: 10,
+    dueTime: "11:00",
+    estimatedDuration: 25,
+    categoryLabel: "To'lovlar",
+    steps: [
+      { id: "s1", text: "Hisobvaraq-faktura va ko'rsatkichlarni tekshirish", completed: false, estimatedMinutes: 10 },
+      { id: "s2", text: "Internet-banking orqali to'lov topshirig'ini jo'natish", completed: false, estimatedMinutes: 15 }
+    ]
+  }
+];
+
+export function getStoredTaskTemplatesHistory(): TaskTemplateItem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_TEMPLATES_HISTORY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberTaskAsTemplate(task: Task): void {
+  if (!task || !task.title || !task.title.trim()) return;
+  try {
+    const current = getStoredTaskTemplatesHistory();
+    const cleanTitle = task.title.trim().toLowerCase();
+    const filtered = current.filter((item) => item.title.trim().toLowerCase() !== cleanTitle);
+
+    const newItem: TaskTemplateItem = {
+      id: "history-tmpl-" + Date.now(),
+      title: task.title.trim(),
+      steps: task.steps && task.steps.length > 0 ? task.steps.map((s) => ({ ...s, completed: false })) : [{ id: "s1", text: task.title.trim(), completed: false }],
+      priority: task.priority,
+      scheduleType: task.scheduleType || "once",
+      dateMode: task.dateMode,
+      monthlyDay: task.monthlyDay,
+      monthlyStartDay: task.monthlyStartDay,
+      monthlyEndDay: task.monthlyEndDay,
+      dueTime: task.dueTime,
+      estimatedDuration: task.estimatedDuration,
+      categoryLabel: "Kiritilgan vazifalar tarixi"
+    };
+
+    filtered.unshift(newItem);
+    if (filtered.length > 50) filtered.pop();
+    localStorage.setItem(STORAGE_KEY_TEMPLATES_HISTORY, JSON.stringify(filtered));
+  } catch (e) {
+    console.error("Failed to remember task template:", e);
+  }
+}
+
+export function getAllTaskTemplates(existingTasks?: Task[]): TaskTemplateItem[] {
+  const result: TaskTemplateItem[] = [];
+  const seenTitles = new Set<string>();
+
+  // 1. First priority: tasks currently in existingTasks (most recent first)
+  if (existingTasks && existingTasks.length > 0) {
+    for (const t of [...existingTasks].reverse()) {
+      const key = t.title.trim().toLowerCase();
+      if (key && !seenTitles.has(key)) {
+        seenTitles.add(key);
+        result.push({
+          id: t.id,
+          title: t.title.trim(),
+          steps: t.steps && t.steps.length > 0 ? t.steps.map((s) => ({ ...s, completed: false })) : [{ id: "s1", text: t.title.trim(), completed: false }],
+          priority: t.priority,
+          scheduleType: t.scheduleType || "once",
+          dateMode: t.dateMode,
+          monthlyDay: t.monthlyDay,
+          monthlyStartDay: t.monthlyStartDay,
+          monthlyEndDay: t.monthlyEndDay,
+          dueTime: t.dueTime,
+          estimatedDuration: t.estimatedDuration,
+          categoryLabel: "Mavjud vazifa"
+        });
+      }
+    }
+  }
+
+  // 2. Second priority: remembered templates history in localStorage
+  const historyTemplates = getStoredTaskTemplatesHistory();
+  for (const ht of historyTemplates) {
+    const key = ht.title.trim().toLowerCase();
+    if (key && !seenTitles.has(key)) {
+      seenTitles.add(key);
+      result.push({
+        ...ht,
+        categoryLabel: ht.categoryLabel || "Oldingi vazifalar"
+      });
+    }
+  }
+
+  // 3. Third priority: built-in standard templates
+  for (const bt of DEFAULT_BUILTIN_TEMPLATES) {
+    const key = bt.title.trim().toLowerCase();
+    if (key && !seenTitles.has(key)) {
+      seenTitles.add(key);
+      result.push(bt);
+    }
+  }
+
+  return result;
+}
 
 export function getTodayString(): string {
   const d = new Date();

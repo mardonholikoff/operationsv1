@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Task, TaskPriority, ScheduleType, DateMode, TaskStep, User } from "../types";
 import {
   getTodayString,
@@ -7,6 +7,8 @@ import {
   addDaysToDate,
   addMonthsToDate,
   formatDateUz,
+  getAllTaskTemplates,
+  TaskTemplateItem,
 } from "../services/storage";
 import {
   X,
@@ -22,7 +24,13 @@ import {
   ArrowRight,
   Sparkles,
   Info,
-  ShieldCheck
+  ShieldCheck,
+  History,
+  RotateCcw,
+  CheckCircle2,
+  Search,
+  Copy,
+  ChevronDown
 } from "lucide-react";
 
 interface TaskFormModalProps {
@@ -161,6 +169,29 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
   ]);
   const [errorMessage, setErrorMessage] = useState("");
 
+  // Template / Oldingi vazifadan nusxa olish holati
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [templateSearchQuery, setTemplateSearchQuery] = useState<string>("");
+  const [appliedTemplateNotification, setAppliedTemplateNotification] = useState<string | null>(null);
+
+  // Barcha mavjud andozalar (oldingi kiritilgan vazifalar + saqlangan tarix + standart tayyor andozalar)
+  const allTemplates = useMemo(() => {
+    return getAllTaskTemplates(existingTasks);
+  }, [existingTasks, isOpen]);
+
+  // Qidiruv bo'yicha filtrlangan andozalar
+  const filteredTemplates = useMemo(() => {
+    if (!templateSearchQuery.trim()) return allTemplates;
+    const q = templateSearchQuery.toLowerCase().trim();
+    return allTemplates.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        t.priority.toLowerCase().includes(q) ||
+        (t.categoryLabel && t.categoryLabel.toLowerCase().includes(q)) ||
+        t.steps?.some((s) => s.text.toLowerCase().includes(q))
+    );
+  }, [allTemplates, templateSearchQuery]);
+
   useEffect(() => {
     if (initialTask) {
       setTitle(initialTask.title);
@@ -180,6 +211,9 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
           ? initialTask.steps.map((s) => ({ ...s }))
           : [{ id: "step-1", text: "", completed: false }]
       );
+      setSelectedTemplateId("");
+      setAppliedTemplateNotification(null);
+      setTemplateSearchQuery("");
     } else {
       // Reset form for fresh task
       setTitle("");
@@ -196,8 +230,80 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
       setUseMonthlyDayPicker(false);
       setSteps([{ id: "step-1", text: "", completed: false }]);
       setErrorMessage("");
+      setSelectedTemplateId("");
+      setAppliedTemplateNotification(null);
+      setTemplateSearchQuery("");
     }
   }, [initialTask, isOpen, defaultDate, defaultTime]);
+
+  // Oldingi vazifadan andoza sifatida formani avtomatik to'ldirish
+  const applyTemplate = (templateTask: TaskTemplateItem | Task) => {
+    setTitle(templateTask.title);
+    setPriority(templateTask.priority);
+    setScheduleType(templateTask.scheduleType || "once");
+    setDateMode(templateTask.dateMode || "single");
+    setMonthlyDay(templateTask.monthlyDay || 15);
+    setMonthlyStartDay(templateTask.monthlyStartDay || 10);
+    setMonthlyEndDay(templateTask.monthlyEndDay || 20);
+    setDueTime(templateTask.dueTime || "09:00");
+    setEstimatedDuration(templateTask.estimatedDuration);
+    setUseMonthlyDayPicker(Boolean(templateTask.monthlyDay || templateTask.monthlyStartDay));
+
+    // Yangi amallar ro'yxati (yangi id lar bilan va completed: false holatda)
+    if (templateTask.steps && templateTask.steps.length > 0) {
+      setSteps(
+        templateTask.steps.map((s, idx) => ({
+          id: `step-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`,
+          text: s.text,
+          completed: false,
+          estimatedMinutes: s.estimatedMinutes,
+        }))
+      );
+    } else {
+      setSteps([{ id: "step-1", text: templateTask.title, completed: false }]);
+    }
+
+    // Sana: agar ochilganda defaultDate belgilangan bo'lsa uni saqlab qolamiz
+    const targetDate = defaultDate || getTodayString();
+    setStartDate(targetDate);
+    setDueDate(targetDate);
+
+    setSelectedTemplateId(templateTask.id);
+    setErrorMessage("");
+
+    setAppliedTemplateNotification(
+      `"${templateTask.title}" andozasi tanlandi va barcha maydonlar to'ldirildi. O'zingizga moslab bemalol tahrirlashingiz mumkin.`
+    );
+  };
+
+  // Andozani tozalab noldan boshlash
+  const handleResetToBlank = () => {
+    setTitle("");
+    setPriority("Soliq(Muhim)");
+    setScheduleType("daily");
+    setDateMode("single");
+    setMonthlyDay(15);
+    setMonthlyStartDay(10);
+    setMonthlyEndDay(20);
+    setStartDate(defaultDate || getTodayString());
+    setDueDate(defaultDate || getTodayString());
+    setDueTime(defaultTime || "09:00");
+    setEstimatedDuration(undefined);
+    setUseMonthlyDayPicker(false);
+    setSteps([{ id: "step-1", text: "", completed: false }]);
+    setSelectedTemplateId("");
+    setAppliedTemplateNotification(null);
+    setErrorMessage("");
+  };
+
+  // Vazifa nomi kiritilayotganda mos keluvchi tezkor takliflar (autocomplete)
+  const titleSuggestions = useMemo(() => {
+    if (!title.trim() || title.trim().length < 2 || initialTask) return [];
+    const q = title.toLowerCase().trim();
+    return allTemplates
+      .filter((t) => t.title.toLowerCase().includes(q) && t.title.toLowerCase() !== q)
+      .slice(0, 4);
+  }, [title, allTemplates, initialTask]);
 
   // Handler for schedule type toggle
   const handleScheduleTypeChange = (type: ScheduleType) => {
@@ -425,6 +531,137 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
             </div>
           )}
 
+          {/* Oldingi (eski) vazifalardan andoza tanlash (Avtomatik to'ldirish) */}
+          {!initialTask && (
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/80 to-slate-50 border-2 border-indigo-200 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2 text-indigo-950 font-bold text-xs sm:text-sm">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold shadow-xs">
+                    <History className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-extrabold text-indigo-950">Eski vazifalardan tanlash</span>
+                    <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-bold">
+                      {allTemplates.length} ta andoza
+                    </span>
+                  </div>
+                </div>
+                {selectedTemplateId && (
+                  <button
+                    type="button"
+                    onClick={handleResetToBlank}
+                    className="inline-flex items-center space-x-1 text-xs font-bold text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                    title="Andozani bekor qilish va yangidan boshlash"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Tozalash</span>
+                  </button>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Avval kiritilgan vazifalar bilan bir xil bo'lsa, qayta to'ldirib o'tirmang — quyidan tanlang. Barcha maydonlar (nomi, vaqti, amallari, muhimligi) avtomatik to'ladi va keyin <strong>bemalol o'zingiz tahrirlashingiz mumkin</strong>.
+              </p>
+
+              {/* Tezkor tavsiyalar (Eng ko'p kiritiladigan andozalar) */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Tezkor andozalar:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {allTemplates.slice(0, 5).map((tmpl) => {
+                    const isSelected = selectedTemplateId === tmpl.id;
+                    return (
+                      <button
+                        key={tmpl.id}
+                        type="button"
+                        onClick={() => applyTemplate(tmpl)}
+                        className={`inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+                          isSelected
+                            ? "bg-indigo-600 text-white border-indigo-700 shadow-xs"
+                            : "bg-white hover:bg-indigo-50 border-indigo-200 hover:border-indigo-300 text-indigo-900"
+                        }`}
+                        title="Ushbu vazifani andoza sifatida tanlash"
+                      >
+                        <Copy className={`w-3 h-3 ${isSelected ? "text-white" : "text-indigo-500"}`} />
+                        <span className="truncate max-w-[180px] sm:max-w-xs">{tmpl.title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Qidiruv va tanlash ro'yxati */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1">
+                <div className="sm:col-span-5 relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={templateSearchQuery}
+                    onChange={(e) => setTemplateSearchQuery(e.target.value)}
+                    placeholder="Andozani qidirish..."
+                    className="w-full pl-8 pr-3 py-2 bg-white border border-indigo-200 hover:border-indigo-300 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                  {templateSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setTemplateSearchQuery("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="sm:col-span-7">
+                  <select
+                    id="select-task-template"
+                    value={selectedTemplateId}
+                    onChange={(e) => {
+                      const found = allTemplates.find((t) => t.id === e.target.value);
+                      if (found) {
+                        applyTemplate(found);
+                      } else if (e.target.value === "") {
+                        handleResetToBlank();
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-white border border-indigo-200 hover:border-indigo-300 rounded-xl text-xs sm:text-sm font-semibold text-slate-800 shadow-2xs focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="">-- Barcha andozalar ro'yxatidan tanlang ({filteredTemplates.length} ta) --</option>
+                    {filteredTemplates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.categoryLabel ? `[${t.categoryLabel}] ` : ""}{t.title}  ({t.priority} • {t.steps?.length || 1} ta amal)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Muvaffaqiyat bildirishnomasi */}
+              {appliedTemplateNotification && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs flex items-start justify-between shadow-2xs animate-fadeIn">
+                  <div className="flex items-start space-x-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold block text-emerald-950">Andoza muvaffaqiyatli yuklandi!</span>
+                      <span className="leading-snug text-emerald-800">
+                        {appliedTemplateNotification} Pastdagi maydonlar, sana, soat va amallar ro'yxatini bemalol tahrirlashingiz mumkin.
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAppliedTemplateNotification(null)}
+                    className="text-emerald-700 hover:text-emerald-950 font-bold px-1.5 py-0.5 rounded cursor-pointer ml-2"
+                    title="Xabarni yopish"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 1. Vazifa Nomi */}
           <div>
             <label
@@ -442,6 +679,33 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
               placeholder="Masalan: QQS hisobotini soliq.uz orqali topshirish"
               className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all font-medium"
             />
+
+            {/* Avtomatik takliflar (nom yozilayotganda mos oldingi vazifalar) */}
+            {titleSuggestions.length > 0 && !selectedTemplateId && (
+              <div className="mt-2 p-2.5 rounded-xl bg-blue-50/90 border border-blue-200 text-xs space-y-1.5 animate-fadeIn">
+                <div className="text-[11px] font-bold text-blue-900 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                  <span>O'xshash oldingi vazifa topildi (bitta bosishda to'liq to'ldirish):</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {titleSuggestions.map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => applyTemplate(st)}
+                      className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-white hover:bg-blue-100 border border-blue-200 hover:border-blue-400 text-blue-900 text-xs font-semibold transition-all cursor-pointer shadow-2xs group"
+                      title="Ushbu vazifadan andoza olish"
+                    >
+                      <Copy className="w-3 h-3 text-blue-500 group-hover:scale-110 transition-transform" />
+                      <span className="font-bold truncate max-w-[200px] sm:max-w-xs">{st.title}</span>
+                      <span className="text-[10px] text-blue-600 font-normal">
+                        ({st.steps?.length || 1} amal{st.estimatedDuration ? `, ${st.estimatedDuration} daq` : ""})
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 2. Vazifa Uchun Ketadigan Vaqt (ixtiyoriy) */}
