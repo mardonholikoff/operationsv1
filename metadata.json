@@ -1,0 +1,7 @@
+{
+  "name": "Tizim",
+  "description": "Operator va Admin rollari bilan vazifalar, hisobotlar va eslatmalar boshqaruvi tizimi.",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

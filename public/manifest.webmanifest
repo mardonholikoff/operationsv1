@@ -1,0 +1,19 @@
+{
+  "short_name": "Vazifalar",
+  "name": "Vazifalar Boshqaruvi va Rejalashtiruvchi PWA",
+  "description": "Operator va Admin rollari uchun vazifalar, hisobotlar va eslatmalar tizimi",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#2563eb",
+  "background_color": "#f8fafc",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity", "utilities"]
+}

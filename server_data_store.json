@@ -1,0 +1,14 @@
+{
+  "tasks": [],
+  "logs": [
+    {
+      "details": "Vazifa tizimdan butunlay o'chirildi.",
+      "operator": "operator1",
+      "id": "log-cleaned",
+      "action": "deleted",
+      "taskTitle": "sdsd",
+      "timestamp": "2026-08-14T12:05:00.000Z"
+    }
+  ],
+  "lastSyncedAt": "2026-08-14T12:05:00.000Z"
+}

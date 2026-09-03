@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "Vazifalar ro'yxati va holati",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "priority": { "type": "string", "enum": ["Soliq(Muhim)", "Soliq", "Kunlik", "Boshqa"] },
+        "scheduleType": { "type": "string", "enum": ["once", "monthly"] },
+        "dateMode": { "type": "string", "enum": ["fixed", "range"] },
+        "dueDate": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "monthlyDay": { "type": "number" },
+        "steps": { "type": "array" },
+        "isCompleted": { "type": "boolean" },
+        "completedAt": { "type": "string" },
+        "completedBy": { "type": "string" },
+        "completionNotes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "history": { "type": "array" }
+      },
+      "required": ["title", "priority", "scheduleType", "dueDate", "isCompleted", "createdAt"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit va amallar jurnali",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string" },
+        "action": { "type": "string" },
+        "operator": { "type": "string" },
+        "taskTitle": { "type": "string" },
+        "details": { "type": "string" },
+        "taskId": { "type": "string" }
+      },
+      "required": ["timestamp", "action", "operator", "taskTitle"]
+    },
+    "SystemMeta": {
+      "title": "SystemMeta",
+      "description": "Tizim sozlamalari va oxirgi avto-ko'chirish sanasi",
+      "type": "object",
+      "properties": {
+        "lastRolloverDate": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Barcha vazifalar kolleksiyasi"
+    },
+    "/activity_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Amallar va o'zgarishlar jurnali"
+    },
+    "/system_meta/{docId}": {
+      "schema": "SystemMeta",
+      "description": "Tizim holati"
+    }
+  }
+}
