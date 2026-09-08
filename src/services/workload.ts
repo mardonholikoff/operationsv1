@@ -23,6 +23,18 @@ export function getTaskEstimatedMinutes(task: Task): number {
   return 30;
 }
 
+/**
+ * Vazifaning amaldagi sarflangan yoki rejadagi daqiqasini aniqlash.
+ * Agar vazifa bajarilgan bo'lsa va unga haqiqiy vaqt (actualDuration) kiritilgan bo'lsa,
+ * shu haqiqiy vaqt hisoblanadi. Aks holda rejadagi vaqt (estimatedDuration) olinadi.
+ */
+export function getTaskEffectiveMinutes(task: Task): number {
+  if (task.isCompleted && typeof task.actualDuration === "number" && task.actualDuration >= 0) {
+    return task.actualDuration;
+  }
+  return getTaskEstimatedMinutes(task);
+}
+
 export interface DayWorkloadStats {
   date: string;
   totalTasks: number;
@@ -36,6 +48,7 @@ export interface DayWorkloadStats {
   isOverloaded: boolean; // > 100%
   overloadedMinutes: number;
   remainingMinutes: number; // Agar < 480 bo'lsa, qolgan erkin vaqt
+  savedMinutes: number; // Rejalashtirilganiga nisbatan tejalgan (bo'shagan) vaqt
   totalSteps: number;
   completedSteps: number;
   stepsPercent: number;
@@ -49,15 +62,58 @@ export function calculateDayWorkload(dateStr: string, tasks: Task[]): DayWorkloa
 
   let totalMinutes = 0;
   let completedMinutes = 0;
+  let pendingMinutes = 0;
+  let savedMinutes = 0;
   let totalSteps = 0;
   let completedSteps = 0;
 
   dayTasks.forEach((task) => {
-    const minutes = getTaskEstimatedMinutes(task);
-    totalMinutes += minutes;
+    const plannedMinutes = getTaskEstimatedMinutes(task);
 
     if (task.isCompleted) {
-      completedMinutes += minutes;
+      const effective = (typeof task.actualDuration === "number" && task.actualDuration >= 0)
+        ? task.actualDuration
+        : plannedMinutes;
+
+      completedMinutes += effective;
+      totalMinutes += effective;
+
+      // Agar amalda sarflangan vaqt rejalashtirilgandan kam bo'lsa, bo'shagan vaqtni hisoblaymiz
+      if (typeof task.actualDuration === "number" && task.actualDuration < plannedMinutes) {
+        savedMinutes += (plannedMinutes - task.actualDuration);
+      }
+    } else {
+      // Agar vazifa hali to'liq yakunlanmagan bo'lsa, lekin uning ayrim amallari bajarilgan bo'lsa:
+      if (task.steps && task.steps.length > 0) {
+        let taskCompletedMinutes = 0;
+        let taskPendingMinutes = 0;
+
+        task.steps.forEach((st) => {
+          const stepPlan = typeof st.estimatedMinutes === "number" && st.estimatedMinutes > 0
+            ? st.estimatedMinutes
+            : Math.round(plannedMinutes / task.steps!.length);
+
+          if (st.completed) {
+            const stepActual = typeof st.actualMinutes === "number" && st.actualMinutes >= 0
+              ? st.actualMinutes
+              : stepPlan;
+
+            taskCompletedMinutes += stepActual;
+            if (typeof st.actualMinutes === "number" && st.actualMinutes < stepPlan) {
+              savedMinutes += (stepPlan - st.actualMinutes);
+            }
+          } else {
+            taskPendingMinutes += stepPlan;
+          }
+        });
+
+        completedMinutes += taskCompletedMinutes;
+        pendingMinutes += taskPendingMinutes;
+        totalMinutes += (taskCompletedMinutes + taskPendingMinutes);
+      } else {
+        pendingMinutes += plannedMinutes;
+        totalMinutes += plannedMinutes;
+      }
     }
 
     if (task.steps && task.steps.length > 0) {
@@ -67,7 +123,6 @@ export function calculateDayWorkload(dateStr: string, tasks: Task[]): DayWorkloa
   });
 
   const workloadPercent = Math.round((totalMinutes / DAILY_WORK_MINUTES) * 100);
-  const pendingMinutes = Math.max(0, totalMinutes - completedMinutes);
   const isOverloaded = totalMinutes > DAILY_WORK_MINUTES;
   const overloadedMinutes = isOverloaded ? totalMinutes - DAILY_WORK_MINUTES : 0;
   const remainingMinutes = !isOverloaded ? DAILY_WORK_MINUTES - totalMinutes : 0;
@@ -91,6 +146,7 @@ export function calculateDayWorkload(dateStr: string, tasks: Task[]): DayWorkloa
     isOverloaded,
     overloadedMinutes,
     remainingMinutes,
+    savedMinutes,
     totalSteps,
     completedSteps,
     stepsPercent,
@@ -120,10 +176,10 @@ export interface TaskTimeDetail {
  * Berilgan vazifalar ichidan eng ko'p vaqt talab qilgan vazifalarni reytingi
  */
 export function getTopTimeConsumingTasks(tasks: Task[], limit: number = 5): TaskTimeDetail[] {
-  const totalPeriodMinutes = tasks.reduce((sum, t) => sum + getTaskEstimatedMinutes(t), 0);
+  const totalPeriodMinutes = tasks.reduce((sum, t) => sum + getTaskEffectiveMinutes(t), 0);
   
   const mapped = tasks.map((task) => {
-    const totalMinutes = getTaskEstimatedMinutes(task);
+    const totalMinutes = getTaskEffectiveMinutes(task);
     const stepsCount = task.steps?.length || 0;
     const completedStepsCount = task.steps?.filter((s) => s.completed).length || 0;
     const percentageOfTotal = totalPeriodMinutes > 0 ? Math.round((totalMinutes / totalPeriodMinutes) * 100) : 0;

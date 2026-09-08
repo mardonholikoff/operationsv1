@@ -10,6 +10,8 @@ import {
   getTopTimeConsumingSteps,
   formatMinutesUz,
 } from "../services/workload";
+import { calculateTaskTypeAnalytics } from "../services/typeAnalytics";
+import { TaskTypeTopSummary, TaskTypeDetailedSection } from "./TaskTypeAnalytics";
 import {
   Calendar,
   CalendarDays,
@@ -53,11 +55,12 @@ const MONTH_NAMES = [
   "Dekabr",
 ];
 
-export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => {
+export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpenTaskDetails }) => {
   // -------------------------------------------------------------
   // 1. KUNLIK ANALITIKA HOLATI
   // -------------------------------------------------------------
   const [selectedDay, setSelectedDay] = useState<string>(() => getTodayString());
+  const [dayPriorityFilter, setDayPriorityFilter] = useState<string | null>(null);
 
   const handlePrevDay = () => {
     const d = new Date(selectedDay);
@@ -84,13 +87,22 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
     return tasks.filter((t) => t.dueDate === selectedDay);
   }, [selectedDay, tasks]);
 
-  const dayTopTasks = useMemo(() => {
-    return getTopTimeConsumingTasks(dayTasks, 6);
+  const dayTypeAnalytics = useMemo(() => {
+    return calculateTaskTypeAnalytics(dayTasks);
   }, [dayTasks]);
 
+  const dayFilteredTasks = useMemo(() => {
+    if (!dayPriorityFilter) return dayTasks;
+    return dayTasks.filter((t) => t.priority === dayPriorityFilter);
+  }, [dayTasks, dayPriorityFilter]);
+
+  const dayTopTasks = useMemo(() => {
+    return getTopTimeConsumingTasks(dayFilteredTasks, 6);
+  }, [dayFilteredTasks]);
+
   const dayTopSteps = useMemo(() => {
-    return getTopTimeConsumingSteps(dayTasks, 8);
-  }, [dayTasks]);
+    return getTopTimeConsumingSteps(dayFilteredTasks, 8);
+  }, [dayFilteredTasks]);
 
   // -------------------------------------------------------------
   // 2. OYLIK ANALITIKA HOLATI
@@ -101,6 +113,7 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
   const [selectedMonth, setSelectedMonth] = useState<number>(() => {
     return new Date().getMonth(); // 0 - 11
   });
+  const [monthPriorityFilter, setMonthPriorityFilter] = useState<string | null>(null);
 
   const handlePrevMonth = () => {
     if (selectedMonth === 0) {
@@ -131,6 +144,15 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
     const monthPrefix = `${selectedYear}-${String(selectedMonth + 1).padStart(2, "0")}`;
     return tasks.filter((t) => t.dueDate.startsWith(monthPrefix));
   }, [selectedYear, selectedMonth, tasks]);
+
+  const monthTypeAnalytics = useMemo(() => {
+    return calculateTaskTypeAnalytics(monthTasks);
+  }, [monthTasks]);
+
+  const monthFilteredTasks = useMemo(() => {
+    if (!monthPriorityFilter) return monthTasks;
+    return monthTasks.filter((t) => t.priority === monthPriorityFilter);
+  }, [monthTasks, monthPriorityFilter]);
 
   // Oydagi umumiy statistika
   const monthStats = useMemo(() => {
@@ -184,12 +206,12 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
   }, [monthTasks, selectedYear, selectedMonth]);
 
   const monthTopTasks = useMemo(() => {
-    return getTopTimeConsumingTasks(monthTasks, 8);
-  }, [monthTasks]);
+    return getTopTimeConsumingTasks(monthFilteredTasks, 8);
+  }, [monthFilteredTasks]);
 
   const monthTopSteps = useMemo(() => {
-    return getTopTimeConsumingSteps(monthTasks, 10);
-  }, [monthTasks]);
+    return getTopTimeConsumingSteps(monthFilteredTasks, 10);
+  }, [monthFilteredTasks]);
 
   // -------------------------------------------------------------
   // 3. MA'LUM VAQT ORALIG'I (CUSTOM DATE RANGE) HOLATI
@@ -197,6 +219,7 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
   // -------------------------------------------------------------
   const [rangeStartDate, setRangeStartDate] = useState<string>("");
   const [rangeEndDate, setRangeEndDate] = useState<string>("");
+  const [rangePriorityFilter, setRangePriorityFilter] = useState<string | null>(null);
 
   const isRangeSelected = Boolean(rangeStartDate && rangeEndDate && rangeStartDate <= rangeEndDate);
 
@@ -204,6 +227,15 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
     if (!isRangeSelected) return [];
     return tasks.filter((t) => t.dueDate >= rangeStartDate && t.dueDate <= rangeEndDate);
   }, [isRangeSelected, rangeStartDate, rangeEndDate, tasks]);
+
+  const rangeTypeAnalytics = useMemo(() => {
+    return calculateTaskTypeAnalytics(rangeTasks);
+  }, [rangeTasks]);
+
+  const rangeFilteredTasks = useMemo(() => {
+    if (!rangePriorityFilter) return rangeTasks;
+    return rangeTasks.filter((t) => t.priority === rangePriorityFilter);
+  }, [rangeTasks, rangePriorityFilter]);
 
   const rangeStats = useMemo(() => {
     if (!isRangeSelected) return null;
@@ -252,13 +284,13 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
 
   const rangeTopTasks = useMemo(() => {
     if (!isRangeSelected) return [];
-    return getTopTimeConsumingTasks(rangeTasks, 8);
-  }, [isRangeSelected, rangeTasks]);
+    return getTopTimeConsumingTasks(rangeFilteredTasks, 8);
+  }, [isRangeSelected, rangeFilteredTasks]);
 
   const rangeTopSteps = useMemo(() => {
     if (!isRangeSelected) return [];
-    return getTopTimeConsumingSteps(rangeTasks, 10);
-  }, [isRangeSelected, rangeTasks]);
+    return getTopTimeConsumingSteps(rangeFilteredTasks, 10);
+  }, [isRangeSelected, rangeFilteredTasks]);
 
   const handleResetRange = () => {
     setRangeStartDate("");
@@ -483,6 +515,14 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
             </div>
           </div>
 
+          {/* Kunlik Ish Turlari Bo'yicha Taqsimot (Tepada) */}
+          <TaskTypeTopSummary
+            analytics={dayTypeAnalytics}
+            periodLabel="Kunlik"
+            selectedPriorityFilter={dayPriorityFilter}
+            onSelectPriorityFilter={setDayPriorityFilter}
+          />
+
           {/* Deep Time Consumption Analysis Grid (Tasks vs Steps) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
             {/* Left: Top Time-Consuming Tasks */}
@@ -621,6 +661,13 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
               )}
             </div>
           </div>
+
+          {/* Kunlik Ish Turlari Bo'yicha Chuqur Tahlil (Pastda) */}
+          <TaskTypeDetailedSection
+            analytics={dayTypeAnalytics}
+            periodTitle="Kunlik"
+            onOpenTaskDetails={onOpenTaskDetails}
+          />
         </div>
       </section>
 
@@ -793,6 +840,14 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
             </div>
           </div>
 
+          {/* Oylik Ish Turlari Bo'yicha Taqsimot (Tepada) */}
+          <TaskTypeTopSummary
+            analytics={monthTypeAnalytics}
+            periodLabel={`${MONTH_NAMES[selectedMonth]} ${selectedYear}`}
+            selectedPriorityFilter={monthPriorityFilter}
+            onSelectPriorityFilter={setMonthPriorityFilter}
+          />
+
           {/* Monthly Top Time Consumers */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
             {/* Top Tasks this month */}
@@ -926,6 +981,13 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
               )}
             </div>
           </div>
+
+          {/* Oylik Ish Turlari Bo'yicha Chuqur Tahlil (Pastda) */}
+          <TaskTypeDetailedSection
+            analytics={monthTypeAnalytics}
+            periodTitle="Oylik"
+            onOpenTaskDetails={onOpenTaskDetails}
+          />
         </div>
       </section>
 
@@ -1127,6 +1189,14 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
                 </div>
               </div>
 
+              {/* Oraliq Ish Turlari Bo'yicha Taqsimot (Tepada) */}
+              <TaskTypeTopSummary
+                analytics={rangeTypeAnalytics}
+                periodLabel="Tanlangan Oraliq"
+                selectedPriorityFilter={rangePriorityFilter}
+                onSelectPriorityFilter={setRangePriorityFilter}
+              />
+
               {/* Range Top Time Consumers */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
                 {/* Top Tasks */}
@@ -1260,6 +1330,13 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks }) => 
                   )}
                 </div>
               </div>
+
+              {/* Oraliq Ish Turlari Bo'yicha Chuqur Tahlil (Pastda) */}
+              <TaskTypeDetailedSection
+                analytics={rangeTypeAnalytics}
+                periodTitle="Oraliq"
+                onOpenTaskDetails={onOpenTaskDetails}
+              />
             </div>
           )}
         </div>

@@ -134,7 +134,7 @@ export const DEFAULT_BUILTIN_TEMPLATES: TaskTemplateItem[] = [
   {
     id: "builtin-tmpl-8",
     title: "Ofis ijarasi va kommunal xizmatlar to'lovini amalga oshirish",
-    priority: "Takrorlanmas ish(Muhim)",
+    priority: "Ichki hisobot(Muhim)",
     scheduleType: "monthly",
     dateMode: "single",
     monthlyDay: 10,
@@ -343,12 +343,18 @@ export function getNextOccurrenceDate(
   return start;
 }
 
-export function formatTaskScheduleDisplay(task: Task): { label: string; detail: string; shortTag: string } {
+export function formatTaskScheduleDisplay(task: Task): {
+  label: string;
+  detail: string;
+  shortTag: string;
+  badgeClass: string;
+} {
   if (task.scheduleType === "daily") {
     return {
       label: "Har kunlik",
       detail: task.startDate ? `${formatDateUz(task.startDate)} dan har kuni muntazam eslatiladi` : "Har kuni muntazam eslatiladi",
-      shortTag: "Har kuni"
+      shortTag: "Har kuni",
+      badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200"
     };
   }
 
@@ -356,15 +362,17 @@ export function formatTaskScheduleDisplay(task: Task): { label: string; detail: 
     return {
       label: "Har 3 kunda bir",
       detail: task.startDate ? `${formatDateUz(task.startDate)} dan har 3 kunda eslatiladi` : "Har 3 kunda bir",
-      shortTag: "Har 3 kunda"
+      shortTag: "Har 3 kunda",
+      badgeClass: "bg-teal-50 text-teal-700 border-teal-200"
     };
   }
 
   if (task.scheduleType === "weekly") {
     return {
       label: "Har haftada bir",
-      detail: task.startDate ? `${formatDateUz(task.startDate)} dan har haftada bir marta` : "Har haftada bir",
-      shortTag: "Har hafta"
+      detail: task.startDate ? `${formatDateUz(task.startDate)} dan har haftada bir marta` : "Har haftada bir marta",
+      shortTag: "Har hafta",
+      badgeClass: "bg-cyan-50 text-cyan-700 border-cyan-200"
     };
   }
 
@@ -373,20 +381,23 @@ export function formatTaskScheduleDisplay(task: Task): { label: string; detail: 
       return {
         label: `Har oy (${task.monthlyStartDay}-${task.monthlyEndDay}-kunlar)`,
         detail: `Har oyning ${task.monthlyStartDay}-sanasidan ${task.monthlyEndDay}-sanasigacha`,
-        shortTag: `Har oy (${task.monthlyStartDay}-${task.monthlyEndDay})`
+        shortTag: `Har oy (${task.monthlyStartDay}-${task.monthlyEndDay}-kun)`,
+        badgeClass: "bg-indigo-50 text-indigo-700 border-indigo-200"
       };
     }
-    if (task.startDate) {
+    if (task.monthlyDay) {
       return {
-        label: "Har oyda bir",
-        detail: `${formatDateUz(task.startDate)} dan har oy muntazam eslatiladi`,
-        shortTag: "Har oy"
+        label: `Har oy (${task.monthlyDay}-kun)`,
+        detail: `Har oyning ${task.monthlyDay}-sanasida`,
+        shortTag: `Har oy (${task.monthlyDay}-kun)`,
+        badgeClass: "bg-indigo-50 text-indigo-700 border-indigo-200"
       };
     }
     return {
-      label: `Har oy (${task.monthlyDay || 15}-kun)`,
-      detail: `Har oyning ${task.monthlyDay || 15}-sanasida`,
-      shortTag: `Har oy (${task.monthlyDay || 15})`
+      label: "Oyda bir marta",
+      detail: task.startDate ? `${formatDateUz(task.startDate)} dan har oy muntazam eslatiladi` : "Har oy muntazam eslatiladi",
+      shortTag: "Oyda bir marta",
+      badgeClass: "bg-indigo-50 text-indigo-700 border-indigo-200"
     };
   }
 
@@ -395,14 +406,16 @@ export function formatTaskScheduleDisplay(task: Task): { label: string; detail: 
     return {
       label: "Muddat oralig'ida",
       detail: `${formatDateUz(task.startDate)} dan ${formatDateUz(task.dueDate)} gacha`,
-      shortTag: "Oraliq"
+      shortTag: "Muddat oralig'i",
+      badgeClass: "bg-slate-100 text-slate-700 border-slate-200"
     };
   }
 
   return {
     label: "Bir martalik",
     detail: formatDateUz(task.dueDate),
-    shortTag: "Bir martalik"
+    shortTag: "Bir martalik",
+    badgeClass: "bg-slate-100 text-slate-700 border-slate-200"
   };
 }
 

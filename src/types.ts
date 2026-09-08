@@ -26,6 +26,8 @@ export interface TaskStep {
   text: string;
   completed: boolean;
   estimatedMinutes?: number; // Har bir amal uchun ajratilgan vaqt (daqiqa)
+  actualMinutes?: number; // Har bir amal uchun amalda sarflangan vaqt (daqiqa)
+  completedAt?: string;
 }
 
 export interface TaskRescheduleHistory {
@@ -56,6 +58,7 @@ export interface Task {
   dueDate: string; // YYYY-MM-DD (deadline or single day or end date)
   dueTime?: string; // HH:mm formatida (masalan "09:00", "14:30")
   estimatedDuration?: number; // Vazifa uchun umumiy ajratilgan vaqt (daqiqa)
+  actualDuration?: number; // Vazifani bajarishga amalda sarflangan vaqt (daqiqa - ixtiyoriy)
   status: TaskStatus;
   isCompleted: boolean;
   completedAt?: string;

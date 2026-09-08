@@ -33,7 +33,12 @@ interface TaskCalendarViewProps {
   onOpenCompleteModal: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (taskId: string) => void;
-  onToggleStep?: (taskId: string, stepId: string) => void;
+  onToggleStep?: (
+    taskId: string,
+    stepId: string,
+    actualMinutes?: number,
+    completeEntireTask?: boolean
+  ) => void;
 }
 
 const UZ_MONTH_NAMES = [

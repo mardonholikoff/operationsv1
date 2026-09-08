@@ -1,7 +1,8 @@
-import React from "react";
-import { Task } from "../types";
+import React, { useState } from "react";
+import { Task, TaskStep } from "../types";
 import { getPriorityBadge } from "./TaskCard";
 import { formatDateUz } from "../services/storage";
+import { StepCompleteModal } from "./StepCompleteModal";
 import {
   Clock,
   Plus,
@@ -25,7 +26,12 @@ interface HourlyTimelineProps {
   onEditTask: (task: Task) => void;
   onDeleteTask: (taskId: string) => void;
   onAddTaskAtHour: (hour: string) => void;
-  onToggleStep?: (taskId: string, stepId: string) => void;
+  onToggleStep?: (
+    taskId: string,
+    stepId: string,
+    actualMinutes?: number,
+    completeEntireTask?: boolean
+  ) => void;
 }
 
 const HOURS_RANGE = [
@@ -44,6 +50,11 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
   onAddTaskAtHour,
   onToggleStep,
 }) => {
+  const [selectedStepModal, setSelectedStepModal] = useState<{
+    task: Task;
+    step: TaskStep;
+  } | null>(null);
+
   // Filter tasks for this date
   const dayTasks = tasks.filter((t) => t.dueDate === date);
 
@@ -266,6 +277,21 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                                       Bajarildi
                                     </span>
                                   )}
+
+                                  {/* Prominent Quick Tick Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenCompleteModal(task)}
+                                    className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-bold border transition-all cursor-pointer ${
+                                      task.isCompleted
+                                        ? "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200"
+                                        : "bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-700 shadow-2xs active:scale-95"
+                                    }`}
+                                    title={task.isCompleted ? "Bajarilgan" : "Vazifani bajarildi deb belgilash va vaqtni kiritish"}
+                                  >
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    <span>{task.isCompleted ? "Bajarildi" : "Tick (Bajarildi)"}</span>
+                                  </button>
                                 </div>
 
                                 <h4 className={`text-xs sm:text-sm font-bold text-slate-900 leading-snug ${
@@ -278,19 +304,37 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                                   <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
                                     <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
                                       <span>Amallar: {completedSteps}/{totalSteps}</span>
-                                      <span className="text-[10px] text-slate-400">
-                                        {Math.round((completedSteps / totalSteps) * 100)}%
-                                      </span>
+                                      <div className="flex items-center space-x-2">
+                                        <span className="text-[10px] text-slate-400">
+                                          {Math.round((completedSteps / totalSteps) * 100)}%
+                                        </span>
+                                        {!task.isCompleted && (
+                                          <button
+                                            type="button"
+                                            onClick={() => onOpenCompleteModal(task)}
+                                            className="text-[9px] font-bold text-blue-700 hover:text-blue-900 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 cursor-pointer"
+                                            title="Barchasini yakunlash"
+                                          >
+                                            Barchasini tick qilish
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                     <div className="space-y-1">
                                       {task.steps?.map((step) => (
                                         <div
                                           key={step.id}
-                                          onClick={() => onToggleStep && onToggleStep(task.id, step.id)}
+                                          onClick={() => {
+                                            if (!step.completed) {
+                                              setSelectedStepModal({ task, step });
+                                            } else {
+                                              onToggleStep && onToggleStep(task.id, step.id);
+                                            }
+                                          }}
                                           className={`flex items-center justify-between px-2 py-1 rounded text-xs cursor-pointer transition-colors ${
                                             step.completed
-                                              ? "bg-emerald-50 text-emerald-800 line-through opacity-80"
-                                              : "bg-slate-50 hover:bg-slate-100 text-slate-700"
+                                              ? "bg-emerald-50 text-emerald-800 line-through opacity-85"
+                                              : "bg-slate-50 hover:bg-blue-50/50 hover:border-blue-200 text-slate-700 border border-transparent"
                                           }`}
                                         >
                                           <div className="flex items-center space-x-1.5 min-w-0 pr-1">
@@ -298,15 +342,22 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                                               type="checkbox"
                                               checked={step.completed}
                                               onChange={() => {}}
-                                              className="w-3 h-3 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer shrink-0"
+                                              className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer shrink-0"
                                             />
                                             <span className="truncate text-[11px] font-medium">{step.text}</span>
                                           </div>
-                                          {step.estimatedMinutes && (
-                                            <span className="text-[9px] font-bold text-slate-500 bg-white px-1 py-0.5 rounded border border-slate-200 shrink-0">
-                                              {step.estimatedMinutes}m
-                                            </span>
-                                          )}
+                                          <div className="flex items-center space-x-1 shrink-0">
+                                            {step.completed && typeof step.actualMinutes === "number" && (
+                                              <span className="text-[9px] font-extrabold text-emerald-800 bg-emerald-100 px-1 py-0.5 rounded border border-emerald-200">
+                                                ⏱ {step.actualMinutes}m
+                                              </span>
+                                            )}
+                                            {step.estimatedMinutes && (
+                                              <span className="text-[9px] font-bold text-slate-500 bg-white px-1 py-0.5 rounded border border-slate-200">
+                                                {step.estimatedMinutes}m
+                                              </span>
+                                            )}
+                                          </div>
                                         </div>
                                       ))}
                                     </div>
@@ -372,6 +423,21 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
           );
         })}
       </div>
+
+      {/* Step Complete Modal */}
+      {selectedStepModal && (
+        <StepCompleteModal
+          isOpen={!!selectedStepModal}
+          task={selectedStepModal.task}
+          step={selectedStepModal.step}
+          onClose={() => setSelectedStepModal(null)}
+          onConfirm={(taskId, stepId, actualMinutes, completeEntireTask) => {
+            if (onToggleStep) {
+              onToggleStep(taskId, stepId, actualMinutes, completeEntireTask);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

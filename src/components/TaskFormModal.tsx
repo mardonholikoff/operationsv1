@@ -71,19 +71,19 @@ const PRIORITY_OPTIONS: { value: TaskPriority; label: string; desc: string; colo
   },
   {
     value: "Takrorlanmas ish(Muhim)",
-    label: "Takrorlanmas ish (Muhim)",
+    label: "Boshqa vazifa (Muhim)",
     desc: "Kechiktirib bo'lmaydigan alohida topshiriqlar",
     color: "bg-purple-50 border-purple-300 text-purple-800"
   },
   {
     value: "Takrorlanmas ish(O'rtacha)",
-    label: "Takrorlanmas ish (O'rtacha)",
+    label: "Boshqa vazifa (O'rtacha)",
     desc: "Oddiy kundalik topshiriqlar va buyurtmalar",
     color: "bg-indigo-50 border-indigo-300 text-indigo-800"
   },
   {
     value: "Takrorlanmas ish(Past)",
-    label: "Takrorlanmas ish (Past)",
+    label: "Boshqa vazifa (Past)",
     desc: "Muddati erkin bo'lgan kichik ishlar",
     color: "bg-emerald-50 border-emerald-300 text-emerald-800"
   }

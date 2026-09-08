@@ -4,6 +4,7 @@ import { formatDateUz, getTodayString, formatTaskScheduleDisplay, getCreatorLabe
 import {
   CheckCircle2,
   Calendar,
+  CalendarDays,
   Repeat,
   CalendarClock,
   Clock,
@@ -60,19 +61,19 @@ export function getPriorityBadge(priority: TaskPriority) {
       return {
         bg: "bg-purple-50 border-purple-200 text-purple-800",
         dot: "bg-purple-600",
-        label: "Takrorlanmas ish (Muhim)",
+        label: "Boshqa vazifa (Muhim)",
       };
     case "Takrorlanmas ish(O'rtacha)":
       return {
         bg: "bg-indigo-50 border-indigo-200 text-indigo-800",
         dot: "bg-indigo-600",
-        label: "Takrorlanmas ish (O'rtacha)",
+        label: "Boshqa vazifa (O'rtacha)",
       };
     case "Takrorlanmas ish(Past)":
       return {
         bg: "bg-emerald-50 border-emerald-200 text-emerald-800",
         dot: "bg-emerald-600",
-        label: "Takrorlanmas ish (Past)",
+        label: "Boshqa vazifa (Past)",
       };
     default:
       return {
@@ -142,27 +143,50 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               </span>
             )}
 
-            {/* Estimated Duration Badge if set */}
-            {task.estimatedDuration && (
-              <span className="inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                ⏱ {task.estimatedDuration} daq
+            {/* Duration Badge: Actual vs Estimated */}
+            {task.isCompleted && typeof task.actualDuration === "number" ? (
+              <span
+                className="inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200"
+                title={`Amalda sarflangan vaqt: ${task.actualDuration} daqiqa${
+                  task.estimatedDuration ? ` (Reja: ${task.estimatedDuration} daq)` : ""
+                }`}
+              >
+                ⏱ {task.actualDuration} daq
+                {task.estimatedDuration && task.actualDuration < task.estimatedDuration && (
+                  <span className="ml-1 text-[10px] text-emerald-700 font-extrabold">
+                    (-{task.estimatedDuration - task.actualDuration}m)
+                  </span>
+                )}
+                {task.estimatedDuration && task.actualDuration > task.estimatedDuration && (
+                  <span className="ml-1 text-[10px] text-amber-700 font-extrabold">
+                    (+{task.actualDuration - task.estimatedDuration}m)
+                  </span>
+                )}
               </span>
+            ) : (
+              task.estimatedDuration && (
+                <span className="inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  ⏱ {task.estimatedDuration} daq
+                </span>
+              )
             )}
 
             {/* Schedule Type */}
-            {task.scheduleType === "monthly" ? (
-              <span className="inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            <span
+              className={`inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-semibold border ${scheduleInfo.badgeClass}`}
+              title={scheduleInfo.detail}
+            >
+              {task.scheduleType === "monthly" ? (
                 <Repeat className="w-3 h-3 mr-1" />
-                {task.dateMode === "range"
-                  ? `Har oy (${task.monthlyStartDay}-${task.monthlyEndDay}-kunlar)`
-                  : `Har oy (${task.monthlyDay || 15}-kun)`}
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+              ) : task.scheduleType === "daily" ? (
+                <CalendarDays className="w-3 h-3 mr-1" />
+              ) : task.scheduleType === "weekly" || task.scheduleType === "every_3_days" ? (
+                <Calendar className="w-3 h-3 mr-1" />
+              ) : (
                 <Clock className="w-3 h-3 mr-1" />
-                {task.dateMode === "range" ? "Muddat oralig'ida" : "Bir martalik"}
-              </span>
-            )}
+              )}
+              {scheduleInfo.label}
+            </span>
 
             {/* Reschedule Badge if moved */}
             {task.history && task.history.length > 0 && (
@@ -200,14 +224,29 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           </div>
         </div>
 
-        {/* Task Title */}
-        <h3
-          className={`text-base font-bold tracking-tight mb-2 ${
-            task.isCompleted ? "text-slate-500 line-through" : "text-slate-900"
-          }`}
-        >
-          {task.title}
-        </h3>
+        {/* Task Title with Quick Tick/Complete Button */}
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <h3
+            className={`text-base font-bold tracking-tight ${
+              task.isCompleted ? "text-slate-500 line-through" : "text-slate-900"
+            }`}
+          >
+            {task.title}
+          </h3>
+          <button
+            type="button"
+            id={`quick-tick-${task.id}`}
+            onClick={() => onOpenCompleteModal(task)}
+            className={`shrink-0 p-1.5 rounded-xl border transition-all cursor-pointer ${
+              task.isCompleted
+                ? "bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200"
+                : "bg-slate-50 hover:bg-emerald-50 border-slate-200 hover:border-emerald-300 text-slate-400 hover:text-emerald-600 shadow-xs"
+            }`}
+            title={task.isCompleted ? "Vazifa bajarilgan" : "Tick: Bajarildi deb belgilash va vaqtni kiritish"}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+          </button>
+        </div>
 
         {/* Date Range detail banner if range mode */}
         {task.dateMode === "range" && (
@@ -297,7 +336,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                     <input
                       type="checkbox"
                       checked={step.completed}
-                      disabled={task.isCompleted}
                       onChange={() => onToggleStep(task.id, step.id)}
                       className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                     />

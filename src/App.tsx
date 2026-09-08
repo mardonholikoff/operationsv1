@@ -326,17 +326,59 @@ export function App() {
     setPendingCount(getPendingQueueCount());
   };
 
-  const handleToggleStep = (taskId: string, stepId: string) => {
+  const handleToggleStep = (
+    taskId: string,
+    stepId: string,
+    actualMinutes?: number,
+    completeEntireTask?: boolean
+  ) => {
     let targetedTask: Task | undefined;
+    let willAllBeCompleted = false;
+
     const updated = tasks.map((task) => {
       if (task.id === taskId) {
         const updatedSteps = (task.steps || []).map((step) => {
           if (step.id === stepId) {
-            return { ...step, completed: !step.completed };
+            const nextCompleted = !step.completed;
+            return {
+              ...step,
+              completed: nextCompleted,
+              actualMinutes: nextCompleted
+                ? (typeof actualMinutes === "number" ? actualMinutes : step.actualMinutes)
+                : undefined,
+              completedAt: nextCompleted ? new Date().toISOString() : undefined,
+            };
           }
           return step;
         });
-        const updatedTask = { ...task, steps: updatedSteps };
+
+        const isNowAllCompleted =
+          updatedSteps.length > 0 && updatedSteps.every((s) => s.completed);
+        const wasTaskCompleted = task.isCompleted;
+
+        // Foydalanuvchi oxirgi amalni ham tick qilib barcha amallarni tugatganida yoki butun vazifani yakunlashni tanlaganida
+        if ((isNowAllCompleted || completeEntireTask) && !wasTaskCompleted) {
+          willAllBeCompleted = true;
+        }
+
+        // Agar avval bajarilgan vazifaning biror amali tick'dan chiqarilsa (uncheck):
+        let newIsCompleted = task.isCompleted;
+        let newStatus = task.status;
+        let newActualDuration = task.actualDuration;
+
+        if (wasTaskCompleted && !isNowAllCompleted && !completeEntireTask) {
+          newIsCompleted = false;
+          newStatus = "pending";
+          newActualDuration = undefined;
+        }
+
+        const updatedTask: Task = {
+          ...task,
+          steps: updatedSteps,
+          isCompleted: newIsCompleted,
+          status: newStatus,
+          actualDuration: newActualDuration,
+        };
         targetedTask = updatedTask;
         return updatedTask;
       }
@@ -356,16 +398,25 @@ export function App() {
         setPendingCount(getPendingQueueCount());
       }
     }
+
+    // Amallarni tick qilib belgilab bajarildi deb qo'yganda:
+    // Sarflangan vaqtni kiritish va tejalgan vaqtni kundan chiqarish modali darhol ochilsin!
+    if (willAllBeCompleted && targetedTask) {
+      setTaskToComplete(targetedTask);
+      setIsCompleteModalOpen(true);
+    }
   };
 
-  const handleConfirmComplete = (taskId: string, note: string) => {
+  const handleConfirmComplete = (taskId: string, note: string, actualDuration?: number) => {
     let completedTaskTitle = "";
     let spawnedTask: Task | null = null;
     let targetUpdatedTask: Task | null = null;
+    let taskEstimatedDuration: number | undefined;
 
     const updated = tasks.map((task) => {
       if (task.id === taskId) {
         completedTaskTitle = task.title;
+        taskEstimatedDuration = task.estimatedDuration;
 
         // If it's a recurring task, calculate the next occurrence
         if (
@@ -422,11 +473,13 @@ export function App() {
 
         const compTask: Task = {
           ...task,
+          steps: (task.steps || []).map((s) => ({ ...s, completed: true })),
           isCompleted: true,
           completedAt: new Date().toISOString(),
           completionNote: note,
           completedBy: currentUser?.username || "operator",
           status: "completed" as const,
+          actualDuration: typeof actualDuration === "number" && actualDuration >= 0 ? actualDuration : undefined,
         };
         targetUpdatedTask = compTask;
         return compTask;
@@ -459,13 +512,31 @@ export function App() {
       }
     }
 
+    let detailsText = "";
+    if (typeof actualDuration === "number") {
+      detailsText = `Sarflangan vaqt: ${actualDuration} daqiqa`;
+      if (taskEstimatedDuration) {
+        const diff = taskEstimatedDuration - actualDuration;
+        if (diff > 0) {
+          detailsText += ` (${diff} daqiqa tejaldi, reja: ${taskEstimatedDuration} daq)`;
+        } else if (diff < 0) {
+          detailsText += ` (+${Math.abs(diff)} daqiqa ortiqcha, reja: ${taskEstimatedDuration} daq)`;
+        } else {
+          detailsText += ` (rejadagidek: ${taskEstimatedDuration} daq)`;
+        }
+      }
+      if (note) detailsText += `. Izoh: ${note}`;
+    } else {
+      detailsText = note ? `Izoh: ${note}` : "Muvaffaqiyatli bajarildi.";
+    }
+
     const log1: ActivityLog = {
       id: "log-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
       timestamp: new Date().toISOString(),
       operator: currentUser?.username || "operator",
       action: "completed",
       taskTitle: completedTaskTitle,
-      details: note ? `Izoh: ${note}` : "Muvaffaqiyatli bajarildi.",
+      details: detailsText,
     };
 
     addActivityLog(log1);
@@ -764,7 +835,13 @@ export function App() {
           {/* Main Content Body */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8">
             {currentUser.role === "admin" && adminViewVersion === "v1" ? (
-              <AdminV1Dashboard tasks={tasks} />
+              <AdminV1Dashboard
+                tasks={tasks}
+                onOpenTaskDetails={(task) => {
+                  setEditingTask(task);
+                  setIsTaskModalOpen(true);
+                }}
+              />
             ) : (
               <OperatorDashboard
                 tasks={tasks}

@@ -1,14 +1,16 @@
-import React from "react";
-import { Task } from "../types";
+import React, { useState } from "react";
+import { Task, TaskStep } from "../types";
 import {
   DAILY_WORK_HOURS,
   DAILY_WORK_MINUTES,
   calculateDayWorkload,
   getTaskEstimatedMinutes,
+  getTaskEffectiveMinutes,
   formatMinutesUz
 } from "../services/workload";
 import { formatDateUz } from "../services/storage";
 import { getPriorityBadge } from "./TaskCard";
+import { StepCompleteModal } from "./StepCompleteModal";
 import {
   Clock,
   CheckCircle2,
@@ -16,17 +18,24 @@ import {
   Flame,
   ListChecks,
   TrendingUp,
+  TrendingDown,
   Percent,
   Calendar,
   Hourglass,
   CheckCheck,
-  CircleDot
+  CircleDot,
+  Zap,
 } from "lucide-react";
 
 interface DayWorkloadAnalyticsProps {
   date: string;
   tasks: Task[];
-  onToggleStep?: (taskId: string, stepId: string) => void;
+  onToggleStep?: (
+    taskId: string,
+    stepId: string,
+    actualMinutes?: number,
+    completeEntireTask?: boolean
+  ) => void;
   onOpenCompleteModal?: (task: Task) => void;
   onOpenHourReschedule?: (task: Task) => void;
 }
@@ -38,6 +47,11 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
   onOpenCompleteModal,
   onOpenHourReschedule,
 }) => {
+  const [selectedStepModal, setSelectedStepModal] = useState<{
+    task: Task;
+    step: TaskStep;
+  } | null>(null);
+
   const stats = calculateDayWorkload(date, tasks);
   const dayTasks = tasks.filter((t) => t.dueDate === date);
 
@@ -190,8 +204,13 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
               </span>
             )}
           </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">
-            Bajarilgani: {formatMinutesUz(stats.completedMinutes)}
+          <div className="text-[10px] text-slate-400 mt-0.5 flex flex-wrap items-center justify-between gap-1">
+            <span>Bajarilgani: {formatMinutesUz(stats.completedMinutes)}</span>
+            {stats.savedMinutes > 0 && (
+              <span className="text-emerald-700 font-bold bg-emerald-100/80 px-1.5 py-0.5 rounded">
+                🎉 {stats.savedMinutes} daq tejaldi
+              </span>
+            )}
           </div>
         </div>
 
@@ -272,11 +291,16 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
         ) : (
           <div className="space-y-3">
             {dayTasks.map((task) => {
-              const taskMinutes = getTaskEstimatedMinutes(task);
-              const taskSharePercent = Math.round((taskMinutes / DAILY_WORK_MINUTES) * 100);
+              const plannedMinutes = getTaskEstimatedMinutes(task);
+              const effectiveMinutes = getTaskEffectiveMinutes(task);
+              const taskSharePercent = Math.round((effectiveMinutes / DAILY_WORK_MINUTES) * 100);
               const priorityBadge = getPriorityBadge(task.priority);
               const steps = task.steps || [];
               const completedCount = steps.filter((s) => s.completed).length;
+
+              const hasActual = task.isCompleted && typeof task.actualDuration === "number";
+              const isActualSaved = hasActual && (task.actualDuration as number) < plannedMinutes;
+              const isActualOver = hasActual && (task.actualDuration as number) > plannedMinutes;
 
               return (
                 <div
@@ -290,6 +314,22 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
                   {/* Task Header info row */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                     <div className="flex items-center space-x-2 min-w-0">
+                      {/* Interactive Task Tick Button */}
+                      <button
+                        type="button"
+                        id={`btn-tick-analytics-${task.id}`}
+                        onClick={() => onOpenCompleteModal && onOpenCompleteModal(task)}
+                        className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                          task.isCompleted
+                            ? "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200"
+                            : "bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-700 shadow-2xs hover:shadow-xs active:scale-95"
+                        }`}
+                        title={task.isCompleted ? "Bajarilgan (qayta ko'rish)" : "Vazifani bajarildi deb belgilash va vaqtni kiritish"}
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>{task.isCompleted ? "Bajarildi" : "Tick (Bajarildi)"}</span>
+                      </button>
+
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold border shrink-0 ${priorityBadge.bg}`}>
                         {priorityBadge.label}
                       </span>
@@ -307,10 +347,32 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
                     </div>
 
                     {/* Workload Contribution & Duration */}
-                    <div className="flex items-center space-x-2 shrink-0 text-xs">
-                      <span className="font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
-                        ⏱ {formatMinutesUz(taskMinutes)}
-                      </span>
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0 text-xs">
+                      {hasActual ? (
+                        <div className="flex items-center space-x-1">
+                          <span className="font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                            ⏱ Sarflandi: {formatMinutesUz(task.actualDuration as number)}
+                          </span>
+                          {isActualSaved && (
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-md">
+                              (-{plannedMinutes - (task.actualDuration as number)} daq tejaldi)
+                            </span>
+                          )}
+                          {isActualOver && (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-md">
+                              (+{(task.actualDuration as number) - plannedMinutes} daq ko'proq)
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400" title={`Rejalashtirilgan vaqt: ${plannedMinutes} daqiqa`}>
+                            (reja: {plannedMinutes}m)
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                          ⏱ {formatMinutesUz(plannedMinutes)}
+                        </span>
+                      )}
+
                       <span
                         className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200"
                         title="8 soatlik umumiy kunlik normaning necha foizini egallashi"
@@ -333,20 +395,38 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
                           <CheckCheck className="w-3.5 h-3.5 text-blue-600" />
                           Kerakli amallar ro'yxati ({completedCount}/{steps.length}):
                         </span>
-                        <span className="text-[10px] text-slate-400">
-                          Amalni bosib bajarilgan deb belgilashingiz mumkin
-                        </span>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[10px] text-slate-400 hidden sm:inline">
+                            Amalni bosib bajarilgan deb belgilashingiz mumkin
+                          </span>
+                          {!task.isCompleted && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenCompleteModal && onOpenCompleteModal(task)}
+                              className="text-[10px] font-extrabold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 cursor-pointer transition-colors"
+                              title="Barcha amallarni birdaniga yakunlash va sarflangan vaqtni kiritish"
+                            >
+                              Barchasini tick qilish
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
                         {steps.map((step, idx) => (
                           <div
                             key={step.id || idx}
-                            onClick={() => onToggleStep && onToggleStep(task.id, step.id)}
+                            onClick={() => {
+                              if (!step.completed) {
+                                setSelectedStepModal({ task, step });
+                              } else {
+                                onToggleStep && onToggleStep(task.id, step.id);
+                              }
+                            }}
                             className={`flex items-center justify-between p-2 rounded-md border text-xs cursor-pointer transition-all ${
                               step.completed
-                                ? "bg-emerald-50/80 border-emerald-200 text-emerald-900 line-through opacity-80"
-                                : "bg-white border-slate-200 hover:border-blue-300 text-slate-800"
+                                ? "bg-emerald-50/80 border-emerald-200 text-emerald-900 line-through opacity-85"
+                                : "bg-white border-slate-200 hover:border-blue-400 hover:bg-blue-50/20 text-slate-800"
                             }`}
                           >
                             <div className="flex items-center space-x-2 min-w-0 pr-2">
@@ -354,18 +434,30 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
                                 type="checkbox"
                                 checked={step.completed}
                                 onChange={() => {}} // handled by parent onClick
-                                className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer shrink-0"
+                                className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer shrink-0"
                               />
-                              <span className="truncate">{step.text}</span>
+                              <span className="truncate font-medium">{step.text}</span>
                             </div>
 
-                            {step.estimatedMinutes && (
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                                step.completed ? "bg-emerald-200/70 text-emerald-900" : "bg-blue-50 text-blue-700"
-                              }`}>
-                                {step.estimatedMinutes} daq
-                              </span>
-                            )}
+                            <div className="flex items-center space-x-1.5 shrink-0">
+                              {step.completed && typeof step.actualMinutes === "number" && (
+                                <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">
+                                  ⏱ {step.actualMinutes}m
+                                  {step.estimatedMinutes && step.actualMinutes < step.estimatedMinutes && (
+                                    <span className="text-emerald-700 ml-1">
+                                      (-{step.estimatedMinutes - step.actualMinutes}m)
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+                              {step.estimatedMinutes && (
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                                  step.completed ? "bg-emerald-200/70 text-emerald-900" : "bg-blue-50 text-blue-700 border border-blue-100"
+                                }`}>
+                                  {step.estimatedMinutes} daq
+                                </span>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -381,6 +473,21 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
           </div>
         )}
       </div>
+
+      {/* Step Complete Modal for entering actual minutes and saving time */}
+      {selectedStepModal && (
+        <StepCompleteModal
+          isOpen={!!selectedStepModal}
+          task={selectedStepModal.task}
+          step={selectedStepModal.step}
+          onClose={() => setSelectedStepModal(null)}
+          onConfirm={(taskId, stepId, actualMinutes, completeEntireTask) => {
+            if (onToggleStep) {
+              onToggleStep(taskId, stepId, actualMinutes, completeEntireTask);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

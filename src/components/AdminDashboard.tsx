@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Task, ActivityLog } from "../types";
 import { TaskTable } from "./TaskTable";
 import { exportTasksToExcel } from "../services/excelExport";
-import { formatDateUz, getTodayString } from "../services/storage";
+import { formatDateUz, getTodayString, formatTaskScheduleDisplay } from "../services/storage";
 import {
   ShieldCheck,
   Activity,
@@ -269,7 +269,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="space-y-0.5">
                     <div className="font-bold text-slate-900">{t.title}</div>
                     <div className="text-slate-500">
-                      Muddati: <span className="font-semibold text-slate-700">{formatDateUz(t.dueDate)}</span> • {t.scheduleType === "monthly" ? `Har oyning ${t.monthlyDay}-kuni` : "Bir martalik"}
+                      Muddati: <span className="font-semibold text-slate-700">{formatDateUz(t.dueDate)}</span> • {formatTaskScheduleDisplay(t).label}
                     </div>
                   </div>
                   <div>
