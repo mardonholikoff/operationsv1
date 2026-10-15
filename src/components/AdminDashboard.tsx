@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Task, ActivityLog } from "../types";
 import { TaskTable } from "./TaskTable";
 import { exportTasksToExcel } from "../services/excelExport";
-import { formatDateUz, getTodayString, formatTaskScheduleDisplay } from "../services/storage";
+import { formatDateUz, getTodayString, formatTaskScheduleDisplay, getTaskOverdueRolloverInfo } from "../services/storage";
 import {
   ShieldCheck,
   Activity,
@@ -10,6 +10,7 @@ import {
   FileSpreadsheet,
   Download,
   AlertOctagon,
+  AlertTriangle,
   CheckCircle2,
   Clock,
   TrendingUp,
@@ -65,6 +66,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const todayStr = getTodayString();
   const overdueCount = tasks.filter((t) => !t.isCompleted && t.dueDate < todayStr).length;
+  const rolledOverTasks = tasks.filter((t) => !t.isCompleted && getTaskOverdueRolloverInfo(t));
 
   const handleExportBackupJson = () => {
     const data = {
@@ -146,6 +148,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Auto-rollover notification banner */}
+      {rolledOverTasks.length > 0 && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start space-x-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="font-extrabold text-amber-950 text-sm">
+                Avtomatik Muddat Ko'chirish Tizimi Faol:
+              </div>
+              <p className="text-xs text-amber-900 mt-0.5 leading-relaxed">
+                Oldingi kunlarda bajarilmay qoldirilgan <strong>{rolledOverTasks.length} ta</strong> vazifa bugungi kunga avtomatik ko'chirilgan va kechikish soni bilan yorliqlangan.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab("tasks")}
+            className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer self-start sm:self-auto"
+          >
+            Kechikkanlarni Ko'rish
+          </button>
+        </div>
+      )}
 
       {/* Admin KPI Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

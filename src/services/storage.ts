@@ -556,57 +556,140 @@ export function saveStoredLogs(logs: ActivityLog[]): void {
   }
 }
 
+export interface TaskOverdueRolloverInfo {
+  isRolledOver: boolean;
+  timesRolled: number;
+  label: string; // e.g. "Bajarilmay qolgan (2-marta ko'chirilgan)"
+  shortBadge: string; // e.g. "⚠️ Bajarilmay o'tgan (2x)"
+  detailedNotice: string; // Tushuntirish matni
+  originalDate?: string;
+  lastRolledDate?: string;
+}
+
+/**
+ * Returns structured info if a task was carried over due to not being completed,
+ * including how many times it was delayed/rolled over.
+ */
+export function getTaskOverdueRolloverInfo(task: Task): TaskOverdueRolloverInfo | null {
+  if (!task) return null;
+  const autoCount = task.autoRolledCount ?? 0;
+  const histCount =
+    task.history?.filter(
+      (h) =>
+        h.isAutomatic ||
+        h.reason?.toLowerCase().includes("bajarilmasdan") ||
+        h.reason?.toLowerCase().includes("bajarilmagan") ||
+        h.reason?.toLowerCase().includes("avtomatik")
+    ).length ?? 0;
+
+  const times = Math.max(autoCount, histCount);
+
+  if (times <= 0 && !task.isOverdueRolled) {
+    return null;
+  }
+
+  const timesRolled = times > 0 ? times : 1;
+
+  let originalDate = task.originalDueDate;
+  if (!originalDate && task.history && task.history.length > 0) {
+    const firstAuto = task.history.find(
+      (h) =>
+        h.isAutomatic ||
+        h.reason?.toLowerCase().includes("bajarilmasdan") ||
+        h.reason?.toLowerCase().includes("bajarilmagan")
+    );
+    if (firstAuto) originalDate = firstAuto.oldDate;
+  }
+
+  return {
+    isRolledOver: true,
+    timesRolled,
+    label: `Bajarilmay qolgan (${timesRolled}-marta ko'chirilgan)`,
+    shortBadge: `⚠️ Bajarilmay o'tgan (${timesRolled}x)`,
+    detailedNotice: `Bu vazifa oldingi kunda bajarilmay qolgani sababli avtomatik bugungi kunga ko'chirildi. Jami ${timesRolled} marta kech qolib boshqa kunga o'tgan.${
+      originalDate ? ` (Dastlabki rejalashtirilgan sana: ${formatDateUz(originalDate)})` : ""
+    }`,
+    originalDate,
+    lastRolledDate: task.lastRolledDate || task.dueDate,
+  };
+}
+
 /**
  * Automatically checks for overdue tasks and rolls them over to today/next day
+ * regardless of the number of existing tasks on that day.
  */
-export function checkAndPerformAutoRollover(tasks: Task[]): { updatedTasks: Task[]; rolledCount: number } {
+export function checkAndPerformAutoRollover(tasks: Task[]): {
+  updatedTasks: Task[];
+  rolledCount: number;
+  changedTasks: Task[];
+} {
   const today = getTodayString();
+  const changedTasks: Task[] = [];
   let rolledCount = 0;
 
   const updatedTasks = tasks.map((task) => {
-    if (task.isCompleted) {
+    // If completed or not past due, do not touch
+    if (task.isCompleted || task.dueDate >= today) {
       return task;
     }
 
-    if (task.dueDate < today) {
-      rolledCount++;
-      const oldDate = task.dueDate;
-      const historyItem = {
-        id: "hist-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
-        oldDate,
-        newDate: today,
-        reason: "Avtomatik keyingi kunga o'tkazildi (bajarilmagan muddat o'tganligi sababli)",
-        rescheduledAt: new Date().toISOString(),
-        operator: "Tizim (Avtomatik)",
-        isAutomatic: true
-      };
+    // Task is uncompleted and dueDate is before today:
+    // Automatically roll over to today regardless of how many tasks are on today!
+    rolledCount++;
+    const oldDate = task.dueDate;
+    const prevAuto = task.autoRolledCount ?? 0;
+    const prevHist =
+      task.history?.filter(
+        (h) =>
+          h.isAutomatic ||
+          h.reason?.toLowerCase().includes("bajarilmasdan") ||
+          h.reason?.toLowerCase().includes("bajarilmagan")
+      ).length ?? 0;
+    const autoCount = Math.max(prevAuto, prevHist) + 1;
+    const originalDueDate = task.originalDueDate || oldDate;
 
-      const updatedHistory = [...(task.history || []), historyItem];
-      const autoCount = (task.autoRolledCount || 0) + 1;
+    const historyItem = {
+      id: "hist-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+      oldDate,
+      newDate: today,
+      oldTime: task.dueTime,
+      newTime: task.dueTime,
+      reason: `Oldingi kunda bajarilmay qoldirilgani sababli avtomatik bugungi kunga o'tkazildi (${autoCount}-marta kechikish)`,
+      rescheduledAt: new Date().toISOString(),
+      operator: "Tizim (Avtomatik)",
+      isAutomatic: true,
+      type: "date" as const,
+      scope: "temporary" as const,
+    };
 
-      addActivityLog({
-        operator: "Tizim",
-        action: "auto_rolled",
-        taskTitle: task.title,
-        details: `Muddat (${oldDate}) o'tib ketganligi sababli avtomatik bugungi kunga (${today}) o'tkazildi.`
-      });
+    const updatedHistory = [...(task.history || []), historyItem];
 
-      return {
-        ...task,
-        dueDate: today,
-        status: "rescheduled" as const,
-        history: updatedHistory,
-        autoRolledCount: autoCount,
-        lastRolledDate: today
-      };
-    }
+    addActivityLog({
+      operator: "Tizim",
+      action: "auto_rolled",
+      taskTitle: task.title,
+      details: `Vazifa o'z vaqtida (${formatDateUz(oldDate)}) bajarilmagani sababli avtomatik tarzda bugungi kunga (${formatDateUz(today)}) o'tkazildi. Jami ${autoCount} marta kech qolib ko'chirilgan.`,
+    });
 
-    return task;
+    const rolledTask: Task = {
+      ...task,
+      dueDate: today,
+      status: "rescheduled" as const,
+      history: updatedHistory,
+      autoRolledCount: autoCount,
+      lastRolledDate: today,
+      originalDueDate,
+      isOverdueRolled: true,
+    };
+
+    changedTasks.push(rolledTask);
+    return rolledTask;
   });
 
   if (rolledCount > 0) {
     saveStoredTasks(updatedTasks);
   }
 
-  return { updatedTasks, rolledCount };
+  return { updatedTasks, rolledCount, changedTasks };
 }
+

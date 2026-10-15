@@ -9,6 +9,7 @@ import {
   formatDateUz,
   getAllTaskTemplates,
   TaskTemplateItem,
+  getTaskOverdueRolloverInfo,
 } from "../services/storage";
 import {
   X,
@@ -530,6 +531,25 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
               <span>{errorMessage}</span>
             </div>
           )}
+
+          {/* Rollover notice if task was carried over because uncompleted */}
+          {initialTask && (() => {
+            const rolloverInfo = getTaskOverdueRolloverInfo(initialTask);
+            if (!rolloverInfo) return null;
+            return (
+              <div className="p-3 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start space-x-2.5 shadow-2xs">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-extrabold text-amber-950">
+                    Kechiktirilgan vazifa ({rolloverInfo.timesRolled}-marta boshqa kunga ko'chirilgan)
+                  </div>
+                  <div className="text-[11px] text-amber-800 mt-0.5 leading-snug">
+                    {rolloverInfo.detailedNotice}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Oldingi (eski) vazifalardan andoza tanlash (Avtomatik to'ldirish) */}
           {!initialTask && (

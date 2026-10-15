@@ -4,7 +4,7 @@ import { TaskCard } from "./TaskCard";
 import { TaskTable } from "./TaskTable";
 import { ActivityLogView } from "./ActivityLogView";
 import { TaskCalendarView } from "./TaskCalendarView";
-import { getTodayString } from "../services/storage";
+import { getTodayString, getTaskOverdueRolloverInfo } from "../services/storage";
 import {
   Plus,
   Calendar,
@@ -52,7 +52,9 @@ export const OperatorDashboard: React.FC<OperatorDashboardProps> = ({
   onClearLogs,
 }) => {
   const [activeMainTab, setActiveMainTab] = useState<"calendar" | "cards" | "table" | "logs">("calendar");
-  const [activeCategoryTab, setActiveCategoryTab] = useState<"today" | "upcoming" | "overdue" | "completed">("today");
+  const [activeCategoryTab, setActiveCategoryTab] = useState<
+    "today" | "upcoming" | "overdue" | "completed" | "rolled_over"
+  >("today");
 
   const todayStr = getTodayString();
   const isAdmin = currentUser?.role === "admin";
@@ -68,6 +70,11 @@ export const OperatorDashboard: React.FC<OperatorDashboardProps> = ({
 
   const overdueTasks = tasks.filter(
     (t) => !t.isCompleted && t.dueDate < todayStr
+  );
+
+  // Rolled over tasks (carried over from previous days because uncompleted)
+  const rolledOverTasks = tasks.filter(
+    (t) => !t.isCompleted && Boolean(getTaskOverdueRolloverInfo(t))
   );
 
   // Completed today filter as requested: "bajarilganlar faqat bugungilarni ko'rsatsin va nomi ham bugun bajarilganlarga o'zgartirilsin"
@@ -86,19 +93,34 @@ export const OperatorDashboard: React.FC<OperatorDashboardProps> = ({
 
   return (
     <div className="space-y-5 pb-12">
-      {/* Top Banner: Auto-rollover notification if any */}
-      {rolledOverCount > 0 && (
-        <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start space-x-3 shadow-xs animate-fadeIn">
-          <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-          <div className="text-xs sm:text-sm">
-            <span className="font-bold">Avtomatik muddat ko'chirish:</span>{" "}
-            Muddati o'tgan {rolledOverCount} ta bajarilmagan vazifa avtomatik ravishda bugungi kunga o'tkazildi va ko'chirish tarixi qayd etildi.
+      {/* Top Banner: Auto-rollover notification */}
+      {(rolledOverCount > 0 || rolledOverTasks.length > 0) && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-fadeIn">
+          <div className="flex items-start space-x-3">
+            <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div className="text-xs sm:text-sm">
+              <span className="font-extrabold text-amber-950">Avtomatik muddat ko'chirish:</span>{" "}
+              Bajarilmay qoldirilgan vazifalar avtomatik ravishda bugungi kunga o'tkazildi.{" "}
+              Hozirda <strong className="text-amber-900 font-black">{rolledOverTasks.length} ta</strong> bajarilmay o'tgan vazifa mavjud va ularga kechikish belgilari qo'yildi.
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveMainTab("cards");
+              setActiveCategoryTab("rolled_over");
+            }}
+            className="self-end sm:self-auto px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer"
+          >
+            Kechikkanlarni Ko'rish
+          </button>
         </div>
       )}
 
-      {/* Ixcham KPI Ko'rsatkichlar Paneli (Kam joy egallaydigan ixcham format) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+      {/* Ixcham KPI Ko'rsatkichlar Paneli */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
         {/* Card 1: Bugun */}
         <button
           onClick={() => {
@@ -133,7 +155,53 @@ export const OperatorDashboard: React.FC<OperatorDashboardProps> = ({
           </div>
         </button>
 
-        {/* Card 2: Yaqinlashayotgan */}
+        {/* Card 2: Bajarilmay O'tganlar (Kechikkan) */}
+        <button
+          onClick={() => {
+            setActiveMainTab("cards");
+            setActiveCategoryTab("rolled_over");
+          }}
+          className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+            activeMainTab === "cards" && activeCategoryTab === "rolled_over"
+              ? "bg-amber-600 border-amber-600 text-white shadow-xs ring-2 ring-amber-400/30"
+              : rolledOverTasks.length > 0
+              ? "bg-amber-50/60 border-amber-300 text-amber-950 hover:bg-amber-100/70 shadow-2xs"
+              : "bg-white border-slate-200 text-slate-900 hover:border-slate-300 hover:bg-slate-50 shadow-2xs"
+          }`}
+        >
+          <div className="min-w-0 pr-2">
+            <div className={`text-[11px] font-bold uppercase tracking-wider truncate ${
+              activeMainTab === "cards" && activeCategoryTab === "rolled_over" ? "text-amber-100" : "text-amber-800"
+            }`}>
+              Bajarilmay O'tgan
+            </div>
+            <div className={`text-[11px] mt-0.5 truncate ${
+              activeMainTab === "cards" && activeCategoryTab === "rolled_over" ? "text-amber-200" : "text-amber-600"
+            }`}>
+              Kechikkan ishlar
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 shrink-0">
+            <span className={`text-xl sm:text-2xl font-black ${
+              activeMainTab === "cards" && activeCategoryTab === "rolled_over"
+                ? "text-white"
+                : rolledOverTasks.length > 0
+                ? "text-amber-700"
+                : "text-slate-900"
+            }`}>
+              {rolledOverTasks.length}
+            </span>
+            <div className={`p-1.5 rounded-lg ${
+              activeMainTab === "cards" && activeCategoryTab === "rolled_over"
+                ? "bg-white/20 text-white"
+                : "bg-amber-100 text-amber-700"
+            }`}>
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+          </div>
+        </button>
+
+        {/* Card 3: Yaqinlashayotgan */}
         <button
           onClick={() => {
             setActiveMainTab("cards");
@@ -392,6 +460,20 @@ export const OperatorDashboard: React.FC<OperatorDashboardProps> = ({
             )}
 
             <button
+              onClick={() => setActiveCategoryTab("rolled_over")}
+              className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+                activeCategoryTab === "rolled_over"
+                  ? "bg-amber-600 text-white shadow-xs"
+                  : rolledOverTasks.length > 0
+                  ? "bg-amber-50 text-amber-950 border border-amber-300 hover:bg-amber-100"
+                  : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <AlertTriangle className={`w-3.5 h-3.5 ${rolledOverTasks.length > 0 ? "text-amber-600" : "text-slate-400"}`} />
+              <span>Bajarilmay O'tganlar ({rolledOverTasks.length})</span>
+            </button>
+
+            <button
               onClick={() => setActiveCategoryTab("completed")}
               className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
                 activeCategoryTab === "completed"
@@ -501,6 +583,37 @@ export const OperatorDashboard: React.FC<OperatorDashboardProps> = ({
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                   {todayCompletedTasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      onToggleStep={onToggleStep}
+                      onOpenCompleteModal={onOpenCompleteModal}
+                      onOpenRescheduleModal={onOpenRescheduleModal}
+                      onOpenHourReschedule={onOpenHourReschedule}
+                      onEditTask={onEditTask}
+                      onDeleteTask={onDeleteTask}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeCategoryTab === "rolled_over" && (
+            <div>
+              {rolledOverTasks.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-500">
+                  <CalendarCheck2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+                  <h3 className="text-base font-bold text-slate-800">
+                    Bajarilmasdan qoldirilib keyingi kunga o'tgan vazifalar yo'q!
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Barcha vazifalar o'z vaqtida bajarilgan yoki muddatida turibdi
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+                  {rolledOverTasks.map((task) => (
                     <TaskCard
                       key={task.id}
                       task={task}

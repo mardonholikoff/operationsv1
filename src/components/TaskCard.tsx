@@ -1,6 +1,12 @@
 import React, { useState } from "react";
 import { Task, TaskPriority } from "../types";
-import { formatDateUz, getTodayString, formatTaskScheduleDisplay, getCreatorLabel } from "../services/storage";
+import {
+  formatDateUz,
+  getTodayString,
+  formatTaskScheduleDisplay,
+  getCreatorLabel,
+  getTaskOverdueRolloverInfo,
+} from "../services/storage";
 import {
   CheckCircle2,
   Calendar,
@@ -99,6 +105,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const todayStr = getTodayString();
   const isOverdue = !task.isCompleted && task.dueDate < todayStr;
   const isToday = !task.isCompleted && task.dueDate === todayStr;
+  const rolloverInfo = getTaskOverdueRolloverInfo(task);
 
   const priorityMeta = getPriorityBadge(task.priority);
   const steps = task.steps || [];
@@ -116,6 +123,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       className={`rounded-2xl border transition-all duration-200 shadow-xs hover:shadow-md ${
         task.isCompleted
           ? "bg-slate-50/70 border-slate-200 opacity-90"
+          : rolloverInfo
+          ? "bg-amber-50/25 border-amber-300 ring-2 ring-amber-400/30"
           : isOverdue
           ? "bg-rose-50/30 border-rose-200 ring-1 ring-rose-300/40"
           : isToday
@@ -127,6 +136,17 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         {/* Top Badges: Priority, Schedule Type, Time, Duration, Date Tag */}
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
           <div className="flex flex-wrap items-center gap-1.5">
+            {/* Rollover badge if delayed / carried over */}
+            {rolloverInfo && (
+              <span
+                className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-black bg-amber-500 text-white shadow-xs border border-amber-600 ring-1 ring-amber-400"
+                title={rolloverInfo.detailedNotice}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 mr-1 text-white shrink-0" />
+                Bajarilmay o'tgan ({rolloverInfo.timesRolled}-marta)
+              </span>
+            )}
+
             {/* Priority Badge */}
             <span
               className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold border ${priorityMeta.bg}`}
@@ -208,6 +228,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
                 <CheckCheck className="w-3.5 h-3.5 mr-1" /> Bajarildi
               </span>
+            ) : rolloverInfo ? (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600 shrink-0" />
+                Kechiktirilgan ({rolloverInfo.timesRolled}x)
+              </span>
             ) : isOverdue ? (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 animate-pulse">
                 <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Muddati o'tgan
@@ -258,15 +283,34 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           </div>
         )}
 
-        {/* Reschedule / Rollover Alert notice */}
-        {task.autoRolledCount && task.autoRolledCount > 0 ? (
-          <div className="mb-3 p-2 bg-amber-50/70 border border-amber-200 rounded-xl text-[11px] text-amber-800 flex items-center">
-            <Info className="w-3.5 h-3.5 mr-1.5 text-amber-600 shrink-0" />
-            <span>
-              Avtomatik keyingi kunga ko'chirilgan ({task.autoRolledCount} marta kechiktirilgan)
-            </span>
+        {/* Rollover / Overdue carried notice banner */}
+        {rolloverInfo && (
+          <div className="mb-3 p-3 bg-gradient-to-r from-amber-50 via-amber-50/90 to-orange-50/80 border border-amber-200 border-l-4 border-l-amber-500 rounded-xl text-xs text-amber-950 shadow-2xs">
+            <div className="flex items-start gap-2.5">
+              <div className="w-6 h-6 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5 font-bold shadow-xs">
+                <AlertTriangle className="w-3.5 h-3.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span className="font-extrabold text-amber-950 text-xs sm:text-[13px]">
+                    Bajarilmay qolgani sababli bugungi kunga o'tkazilgan
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-amber-200/90 text-amber-950 text-[10px] font-black uppercase tracking-wider">
+                    {rolloverInfo.timesRolled}-marta kechikkan
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-800 mt-1 leading-snug">
+                  Bu vazifa oldingi kunda bajarilmasdan qoldirilgani sababli avtomatik tarzda bugungi kunga o'tkazildi.
+                  {rolloverInfo.originalDate && (
+                    <span className="inline-block ml-1 font-bold text-amber-950">
+                      (Dastlabki muddati: {formatDateUz(rolloverInfo.originalDate)})
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
           </div>
-        ) : null}
+        )}
 
         {/* History Expandable Panel */}
         {showHistory && task.history && task.history.length > 0 && (

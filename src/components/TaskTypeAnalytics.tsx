@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Task, TaskPriority } from "../types";
 import { TaskTypeStat, TaskGroupStat, TypeAnalyticsResult } from "../services/typeAnalytics";
 import { formatMinutesUz } from "../services/workload";
-import { formatDateUz } from "../services/storage";
+import { formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
 import {
   Tag,
   Clock,
@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
+  AlertTriangle,
   Zap,
   ListTodo,
   TrendingUp,
@@ -309,54 +310,72 @@ export const TaskTypeDetailedSection: React.FC<TaskTypeDetailedSectionProps> = (
                   {/* Expandable Task List */}
                   {isExpanded && (
                     <div className="mt-2.5 pt-2 border-t border-slate-200 space-y-1.5 max-h-60 overflow-y-auto pr-1">
-                      {stat.tasks.map((t, idx) => (
-                        <div
-                          key={t.id}
-                          onClick={() => onOpenTaskDetails && onOpenTaskDetails(t)}
-                          className={`p-2 rounded-lg border text-left text-xs transition-colors ${
-                            t.isCompleted
-                              ? "bg-slate-50 border-slate-200 text-slate-500"
-                              : "bg-white border-slate-200 text-slate-800 hover:border-slate-300"
-                          } ${onOpenTaskDetails ? "cursor-pointer" : ""}`}
-                        >
-                          <div className="flex items-start justify-between gap-1">
-                            <div className="flex items-start space-x-1.5 min-w-0">
-                              <span className="text-[10px] font-bold text-slate-400 mt-0.5">
-                                {idx + 1}.
-                              </span>
-                              <div className="min-w-0">
-                                <p
-                                  className={`font-semibold truncate ${
-                                    t.isCompleted ? "line-through text-slate-400" : "text-slate-900"
-                                  }`}
-                                >
-                                  {t.title}
-                                </p>
-                                <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                                  <span>📅 {t.dueDate}</span>
-                                  {t.dueTime && <span>⏰ {t.dueTime}</span>}
-                                  {t.steps && t.steps.length > 0 && (
-                                    <span className="text-indigo-600 font-medium">
-                                      • {t.steps.filter((s) => s.completed).length}/{t.steps.length} amal
-                                    </span>
-                                  )}
+                      {stat.tasks.map((t, idx) => {
+                        const rollover = getTaskOverdueRolloverInfo(t);
+                        return (
+                          <div
+                            key={t.id}
+                            onClick={() => onOpenTaskDetails && onOpenTaskDetails(t)}
+                            className={`p-2 rounded-lg border text-left text-xs transition-colors ${
+                              t.isCompleted
+                                ? "bg-slate-50 border-slate-200 text-slate-500"
+                                : rollover
+                                ? "bg-amber-50/40 border-amber-300 ring-1 ring-amber-400/30 text-slate-900"
+                                : "bg-white border-slate-200 text-slate-800 hover:border-slate-300"
+                            } ${onOpenTaskDetails ? "cursor-pointer" : ""}`}
+                          >
+                            <div className="flex items-start justify-between gap-1">
+                              <div className="flex items-start space-x-1.5 min-w-0">
+                                <span className="text-[10px] font-bold text-slate-400 mt-0.5">
+                                  {idx + 1}.
+                                </span>
+                                <div className="min-w-0">
+                                  <p
+                                    className={`font-semibold truncate ${
+                                      t.isCompleted ? "line-through text-slate-400" : "text-slate-900"
+                                    }`}
+                                  >
+                                    {t.title}
+                                  </p>
+                                  <div className="text-[10px] text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
+                                    {rollover && !t.isCompleted && (
+                                      <span
+                                        className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs shrink-0"
+                                        title={rollover.detailedNotice}
+                                      >
+                                        <AlertTriangle className="w-2.5 h-2.5 mr-0.5 text-amber-600 shrink-0" />
+                                        Bajarilmay o'tgan ({rollover.timesRolled}x)
+                                      </span>
+                                    )}
+                                    <span>📅 {t.dueDate}</span>
+                                    {t.dueTime && <span>⏰ {t.dueTime}</span>}
+                                    {t.steps && t.steps.length > 0 && (
+                                      <span className="text-indigo-600 font-medium">
+                                        • {t.steps.filter((s) => s.completed).length}/{t.steps.length} amal
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              {t.isCompleted ? (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                  ✓ Bajarildi
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">
-                                  Kutilmoqda
-                                </span>
-                              )}
+                              <div className="text-right shrink-0">
+                                {t.isCompleted ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                    ✓ Bajarildi
+                                  </span>
+                                ) : rollover ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs">
+                                    Kechikkan ({rollover.timesRolled}x)
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">
+                                    Kutilmoqda
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

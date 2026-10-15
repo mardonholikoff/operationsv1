@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Task } from "../types";
-import { formatDateUz, getTodayString } from "../services/storage";
+import { formatDateUz, getTodayString, getTaskOverdueRolloverInfo } from "../services/storage";
 import {
   DAILY_WORK_HOURS,
   DAILY_WORK_MINUTES,
@@ -89,6 +89,10 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
 
   const dayTypeAnalytics = useMemo(() => {
     return calculateTaskTypeAnalytics(dayTasks);
+  }, [dayTasks]);
+
+  const dayRolledOverTasks = useMemo(() => {
+    return dayTasks.filter((t) => !t.isCompleted && getTaskOverdueRolloverInfo(t));
   }, [dayTasks]);
 
   const dayFilteredTasks = useMemo(() => {
@@ -515,6 +519,28 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
             </div>
           </div>
 
+          {/* Bajarilmay qoldirilgani sababli o'tgan vazifalar ogohlantirish paneli */}
+          {dayRolledOverTasks.length > 0 && (
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-start space-x-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-extrabold text-amber-950 text-xs sm:text-sm">
+                    Bajarilmay Qolgani Sababli O'tgan Vazifalar ({dayRolledOverTasks.length} ta):
+                  </div>
+                  <p className="text-xs text-amber-900 mt-0.5 leading-relaxed">
+                    Oldingi kunlarda bajarilmay qoldirilgani sababli avtomatik tarzda ushbu kunga ko'chirilgan vazifalar mavjud. Ularga kechikish sababi va necha marta ko'chirilgani yorliqlangan.
+                  </p>
+                </div>
+              </div>
+              <span className="px-3 py-1 rounded-xl bg-amber-200/90 border border-amber-300 text-amber-950 text-xs font-black self-start sm:self-auto shrink-0 shadow-2xs">
+                ⚠️ {dayRolledOverTasks.length} ta kechikkan vazifa
+              </span>
+            </div>
+          )}
+
           {/* Kunlik Ish Turlari Bo'yicha Taqsimot (Tepada) */}
           <TaskTypeTopSummary
             analytics={dayTypeAnalytics}
@@ -545,54 +571,70 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {dayTopTasks.map(({ task, totalMinutes, percentageOfTotal, stepsCount, completedStepsCount }, idx) => (
-                    <div
-                      key={task.id}
-                      className="p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors border border-slate-100"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start space-x-2 min-w-0">
-                          <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                            {idx + 1}
-                          </span>
-                          <div className="min-w-0">
-                            <h4
-                              className={`text-xs font-bold truncate ${
-                                task.isCompleted ? "line-through text-slate-400" : "text-slate-800"
-                              }`}
-                            >
-                              {task.title}
-                            </h4>
-                            <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
-                              {task.dueTime && <span>⏰ {task.dueTime}</span>}
-                              {task.category && <span>• {task.category}</span>}
-                              {stepsCount > 0 && (
-                                <span className="text-indigo-600 font-semibold">
-                                  • {completedStepsCount}/{stepsCount} amal
-                                </span>
-                              )}
+                  {dayTopTasks.map(({ task, totalMinutes, percentageOfTotal, stepsCount, completedStepsCount }, idx) => {
+                    const rollover = getTaskOverdueRolloverInfo(task);
+                    return (
+                      <div
+                        key={task.id}
+                        className={`p-3 rounded-xl transition-colors border ${
+                          rollover
+                            ? "bg-amber-50/40 hover:bg-amber-50/70 border-amber-200 ring-1 ring-amber-300/40"
+                            : "bg-slate-50/80 hover:bg-slate-100/80 border-slate-100"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start space-x-2 min-w-0">
+                            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                              {idx + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <h4
+                                className={`text-xs font-bold truncate ${
+                                  task.isCompleted ? "line-through text-slate-400" : "text-slate-800"
+                                }`}
+                              >
+                                {task.title}
+                              </h4>
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 mt-1">
+                                {rollover && (
+                                  <span
+                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-300 shrink-0"
+                                    title={rollover.detailedNotice}
+                                  >
+                                    <AlertTriangle className="w-2.5 h-2.5 mr-0.5 text-amber-600 shrink-0" />
+                                    Bajarilmay o'tgan ({rollover.timesRolled}-marta)
+                                  </span>
+                                )}
+                                {task.dueTime && <span>⏰ {task.dueTime}</span>}
+                                {task.category && <span>• {task.category}</span>}
+                                {stepsCount > 0 && (
+                                  <span className="text-indigo-600 font-semibold">
+                                    • {completedStepsCount}/{stepsCount} amal
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-xs font-bold text-slate-900">
+                              {formatMinutesUz(totalMinutes)}
+                            </div>
+                            <div className="text-[10px] font-semibold text-blue-600">
+                              {percentageOfTotal}% kunlik ulush
                             </div>
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <div className="text-xs font-bold text-slate-900">
-                            {formatMinutesUz(totalMinutes)}
-                          </div>
-                          <div className="text-[10px] font-semibold text-blue-600">
-                            {percentageOfTotal}% kunlik ulush
-                          </div>
+
+                        {/* Mini bar for proportion */}
+                        <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mt-2">
+                          <div
+                            className="h-full bg-blue-600 rounded-full"
+                            style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
+                          />
                         </div>
                       </div>
-
-                      {/* Mini bar for proportion */}
-                      <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mt-2">
-                        <div
-                          className="h-full bg-blue-600 rounded-full"
-                          style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -870,49 +912,65 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {monthTopTasks.map(({ task, totalMinutes, percentageOfTotal, stepsCount }, idx) => (
-                    <div
-                      key={task.id}
-                      className="p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors border border-slate-100"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start space-x-2 min-w-0">
-                          <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                            {idx + 1}
-                          </span>
-                          <div className="min-w-0">
-                            <h4
-                              className={`text-xs font-bold truncate ${
-                                task.isCompleted ? "line-through text-slate-400" : "text-slate-800"
-                              }`}
-                            >
-                              {task.title}
-                            </h4>
-                            <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
-                              <span>📅 {task.dueDate}</span>
-                              {task.category && <span>• {task.category}</span>}
-                              {stepsCount > 0 && <span>• {stepsCount} amal</span>}
+                  {monthTopTasks.map(({ task, totalMinutes, percentageOfTotal, stepsCount }, idx) => {
+                    const rollover = getTaskOverdueRolloverInfo(task);
+                    return (
+                      <div
+                        key={task.id}
+                        className={`p-3 rounded-xl transition-colors border ${
+                          rollover
+                            ? "bg-amber-50/40 hover:bg-amber-50/70 border-amber-200 ring-1 ring-amber-300/40"
+                            : "bg-slate-50/80 hover:bg-slate-100/80 border-slate-100"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start space-x-2 min-w-0">
+                            <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                              {idx + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <h4
+                                className={`text-xs font-bold truncate ${
+                                  task.isCompleted ? "line-through text-slate-400" : "text-slate-800"
+                                }`}
+                              >
+                                {task.title}
+                              </h4>
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 mt-1">
+                                {rollover && (
+                                  <span
+                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-300 shrink-0"
+                                    title={rollover.detailedNotice}
+                                  >
+                                    <AlertTriangle className="w-2.5 h-2.5 mr-0.5 text-amber-600 shrink-0" />
+                                    Bajarilmay o'tgan ({rollover.timesRolled}-marta)
+                                  </span>
+                                )}
+                                <span>📅 {task.dueDate}</span>
+                                {task.category && <span>• {task.category}</span>}
+                                {stepsCount > 0 && <span>• {stepsCount} amal</span>}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-xs font-bold text-slate-900">
+                              {formatMinutesUz(totalMinutes)}
+                            </div>
+                            <div className="text-[10px] font-semibold text-indigo-600">
+                              {percentageOfTotal}% oylik ulush
                             </div>
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <div className="text-xs font-bold text-slate-900">
-                            {formatMinutesUz(totalMinutes)}
-                          </div>
-                          <div className="text-[10px] font-semibold text-indigo-600">
-                            {percentageOfTotal}% oylik ulush
-                          </div>
+
+                        <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mt-2">
+                          <div
+                            className="h-full bg-indigo-600 rounded-full"
+                            style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
+                          />
                         </div>
                       </div>
-
-                      <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mt-2">
-                        <div
-                          className="h-full bg-indigo-600 rounded-full"
-                          style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1219,49 +1277,65 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {rangeTopTasks.map(({ task, totalMinutes, percentageOfTotal, stepsCount }, idx) => (
-                        <div
-                          key={task.id}
-                          className="p-3 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors border border-slate-100"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-start space-x-2 min-w-0">
-                              <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                                {idx + 1}
-                              </span>
-                              <div className="min-w-0">
-                                <h4
-                                  className={`text-xs font-bold truncate ${
-                                    task.isCompleted ? "line-through text-slate-400" : "text-slate-800"
-                                  }`}
-                                >
-                                  {task.title}
-                                </h4>
-                                <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
-                                  <span>📅 {task.dueDate}</span>
-                                  {task.category && <span>• {task.category}</span>}
-                                  {stepsCount > 0 && <span>• {stepsCount} amal</span>}
+                      {rangeTopTasks.map(({ task, totalMinutes, percentageOfTotal, stepsCount }, idx) => {
+                        const rollover = getTaskOverdueRolloverInfo(task);
+                        return (
+                          <div
+                            key={task.id}
+                            className={`p-3 rounded-xl transition-colors border ${
+                              rollover
+                                ? "bg-amber-50/40 hover:bg-amber-50/70 border-amber-200 ring-1 ring-amber-300/40"
+                                : "bg-slate-50/80 hover:bg-slate-100/80 border-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-start space-x-2 min-w-0">
+                                <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                                  {idx + 1}
+                                </span>
+                                <div className="min-w-0">
+                                  <h4
+                                    className={`text-xs font-bold truncate ${
+                                      task.isCompleted ? "line-through text-slate-400" : "text-slate-800"
+                                    }`}
+                                  >
+                                    {task.title}
+                                  </h4>
+                                  <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 mt-1">
+                                    {rollover && (
+                                      <span
+                                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-300 shrink-0"
+                                        title={rollover.detailedNotice}
+                                      >
+                                        <AlertTriangle className="w-2.5 h-2.5 mr-0.5 text-amber-600 shrink-0" />
+                                        Bajarilmay o'tgan ({rollover.timesRolled}-marta)
+                                      </span>
+                                    )}
+                                    <span>📅 {task.dueDate}</span>
+                                    {task.category && <span>• {task.category}</span>}
+                                    {stepsCount > 0 && <span>• {stepsCount} amal</span>}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="text-xs font-bold text-slate-900">
+                                  {formatMinutesUz(totalMinutes)}
+                                </div>
+                                <div className="text-[10px] font-semibold text-purple-600">
+                                  {percentageOfTotal}% oraliq ulushi
                                 </div>
                               </div>
                             </div>
-                            <div className="text-right shrink-0">
-                              <div className="text-xs font-bold text-slate-900">
-                                {formatMinutesUz(totalMinutes)}
-                              </div>
-                              <div className="text-[10px] font-semibold text-purple-600">
-                                {percentageOfTotal}% oraliq ulushi
-                              </div>
+
+                            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mt-2">
+                              <div
+                                className="h-full bg-purple-600 rounded-full"
+                                style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
+                              />
                             </div>
                           </div>
-
-                          <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mt-2">
-                            <div
-                              className="h-full bg-purple-600 rounded-full"
-                              style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

@@ -69,6 +69,8 @@ export interface Task {
   history: TaskRescheduleHistory[];
   autoRolledCount?: number;
   lastRolledDate?: string;
+  originalDueDate?: string; // Dastlabki rejalashtirilgan sana
+  isOverdueRolled?: boolean; // Bajarilmagani sababli keyingi kunga o'tganmi
 }
 
 export interface TaskFilterOptions {

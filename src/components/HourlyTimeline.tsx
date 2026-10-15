@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Task, TaskStep } from "../types";
 import { getPriorityBadge } from "./TaskCard";
-import { formatDateUz } from "../services/storage";
+import { formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
 import { StepCompleteModal } from "./StepCompleteModal";
 import {
   Clock,
@@ -115,30 +115,43 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {unassignedTasks.map((task) => (
-              <div
-                key={task.id}
-                className={`p-2.5 rounded-xl border text-xs bg-white transition-all flex flex-col justify-between ${
-                  task.isCompleted
-                    ? "border-emerald-200 bg-emerald-50/40"
-                    : "border-slate-200 shadow-2xs hover:border-slate-300"
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between gap-1 mb-1">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getPriorityBadge(task.priority).bg}`}>
-                      {task.priority.split("(")[0]}
-                    </span>
-                    {task.isCompleted && (
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
-                        Bajarildi
+            {unassignedTasks.map((task) => {
+              const rolloverInfo = getTaskOverdueRolloverInfo(task);
+              return (
+                <div
+                  key={task.id}
+                  className={`p-2.5 rounded-xl border text-xs bg-white transition-all flex flex-col justify-between ${
+                    task.isCompleted
+                      ? "border-emerald-200 bg-emerald-50/40"
+                      : rolloverInfo
+                      ? "border-amber-300 bg-amber-50/25 ring-1 ring-amber-400/30"
+                      : "border-slate-200 shadow-2xs hover:border-slate-300"
+                  }`}
+                >
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getPriorityBadge(task.priority).bg}`}>
+                        {task.priority.split("(")[0]}
                       </span>
-                    )}
+                      {rolloverInfo && (
+                        <span
+                          className="text-[10px] font-black text-amber-950 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                          title={rolloverInfo.detailedNotice}
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5 text-amber-600" />
+                          {rolloverInfo.timesRolled}x kechikkan
+                        </span>
+                      )}
+                      {task.isCompleted && (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
+                          Bajarildi
+                        </span>
+                      )}
+                    </div>
+                    <div className={`font-bold text-slate-900 line-clamp-1 ${task.isCompleted ? "line-through text-slate-500" : ""}`}>
+                      {task.title}
+                    </div>
                   </div>
-                  <div className={`font-bold text-slate-900 line-clamp-1 ${task.isCompleted ? "line-through text-slate-500" : ""}`}>
-                    {task.title}
-                  </div>
-                </div>
 
                 <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-100">
                   <button
@@ -173,9 +186,10 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
+      </div>
       )}
 
       {/* Hourly Timeline Rows */}
@@ -240,6 +254,7 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                         const priorityInfo = getPriorityBadge(task.priority);
                         const completedSteps = task.steps?.filter((s) => s.completed).length || 0;
                         const totalSteps = task.steps?.length || 0;
+                        const rolloverInfo = getTaskOverdueRolloverInfo(task);
 
                         return (
                           <div
@@ -247,6 +262,8 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                             className={`p-2.5 sm:p-3 rounded-xl border transition-all ${
                               task.isCompleted
                                 ? "bg-emerald-50/60 border-emerald-200"
+                                : rolloverInfo
+                                ? "bg-amber-50/25 border-amber-300 ring-1 ring-amber-400/30 shadow-xs"
                                 : hasOverlap
                                 ? "bg-white border-blue-300 shadow-xs hover:border-blue-400 hover:shadow-sm"
                                 : "bg-white border-slate-200/90 shadow-2xs hover:border-slate-300"
@@ -255,6 +272,16 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1 min-w-0">
                                 <div className="flex flex-wrap items-center gap-1 mb-1">
+                                  {rolloverInfo && (
+                                    <span
+                                      className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 text-amber-950 border border-amber-300 text-[10px] font-black"
+                                      title={rolloverInfo.detailedNotice}
+                                    >
+                                      <AlertTriangle className="w-2.5 h-2.5 mr-0.5 text-amber-600" />
+                                      Bajarilmay o'tgan ({rolloverInfo.timesRolled}x)
+                                    </span>
+                                  )}
+
                                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${priorityInfo.bg}`}>
                                     {priorityInfo.label}
                                   </span>

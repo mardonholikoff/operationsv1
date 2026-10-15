@@ -8,7 +8,7 @@ import {
   getTaskEffectiveMinutes,
   formatMinutesUz
 } from "../services/workload";
-import { formatDateUz } from "../services/storage";
+import { formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
 import { getPriorityBadge } from "./TaskCard";
 import { StepCompleteModal } from "./StepCompleteModal";
 import {
@@ -54,6 +54,7 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
 
   const stats = calculateDayWorkload(date, tasks);
   const dayTasks = tasks.filter((t) => t.dueDate === date);
+  const rolledTasksCount = dayTasks.filter((t) => !t.isCompleted && getTaskOverdueRolloverInfo(t)).length;
 
   // Status color logic based on 8-hour workload percentage
   const getWorkloadTheme = (percent: number) => {
@@ -237,6 +238,12 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
           <div className="text-[10px] text-slate-400 mt-0.5">
             Jami {dayTasks.length} ta topshiriq biriktirilgan
           </div>
+          {rolledTasksCount > 0 && (
+            <div className="text-[10px] text-amber-800 font-bold mt-1.5 flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+              <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+              <span>{rolledTasksCount} ta bajarilmasdan o'tgan</span>
+            </div>
+          )}
         </div>
 
         {/* Card 4: Amallar (Bosqichlar) Tahlili */}
@@ -281,6 +288,21 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
           </span>
         </div>
 
+        {/* Notice for rolled-over tasks on this day */}
+        {rolledTasksCount > 0 && (
+          <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 text-amber-950 flex items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-center space-x-2 text-xs">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                <strong>Oldingi kundan o'tgan:</strong> Ushbu kunga oldingi sanalarda bajarilmay qoldirilgani sababli <strong>{rolledTasksCount} ta</strong> vazifa avtomatik ko'chirilgan va kechikish belgilari bilan yorliqlangan.
+              </span>
+            </div>
+            <span className="text-[11px] font-black px-2 py-0.5 rounded bg-amber-200 text-amber-950 shrink-0">
+              ⚠️ {rolledTasksCount} ta
+            </span>
+          </div>
+        )}
+
         {dayTasks.length === 0 ? (
           <div className="py-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 text-slate-400">
             <Calendar className="w-8 h-8 mx-auto text-slate-300 mb-1" />
@@ -297,6 +319,7 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
               const priorityBadge = getPriorityBadge(task.priority);
               const steps = task.steps || [];
               const completedCount = steps.filter((s) => s.completed).length;
+              const rollover = getTaskOverdueRolloverInfo(task);
 
               const hasActual = task.isCompleted && typeof task.actualDuration === "number";
               const isActualSaved = hasActual && (task.actualDuration as number) < plannedMinutes;
@@ -308,12 +331,14 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
                   className={`p-3 sm:p-3.5 rounded-xl border transition-all ${
                     task.isCompleted
                       ? "bg-slate-50/60 border-slate-200"
+                      : rollover
+                      ? "bg-amber-50/25 border-amber-300 ring-1 ring-amber-400/30 shadow-xs"
                       : "bg-white border-slate-200 hover:border-slate-300 shadow-2xs"
                   }`}
                 >
                   {/* Task Header info row */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center space-x-2 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                       {/* Interactive Task Tick Button */}
                       <button
                         type="button"
@@ -329,6 +354,16 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
                         <CheckCircle2 className="w-4 h-4" />
                         <span>{task.isCompleted ? "Bajarildi" : "Tick (Bajarildi)"}</span>
                       </button>
+
+                      {rollover && !task.isCompleted && (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs shrink-0"
+                          title={rollover.detailedNotice}
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5 mr-1 text-amber-600 shrink-0" />
+                          Bajarilmay o'tgan ({rollover.timesRolled}-marta)
+                        </span>
+                      )}
 
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold border shrink-0 ${priorityBadge.bg}`}>
                         {priorityBadge.label}

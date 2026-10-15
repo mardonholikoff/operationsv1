@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Task } from "../types";
-import { CalendarClock, X, ArrowRight, AlertCircle, FileEdit, Clock, Calendar } from "lucide-react";
-import { getTodayString, formatDateUz } from "../services/storage";
+import { CalendarClock, X, ArrowRight, AlertCircle, FileEdit, Clock, Calendar, AlertTriangle } from "lucide-react";
+import { getTodayString, formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
 
 interface RescheduleTaskModalProps {
   isOpen: boolean;
@@ -133,6 +133,18 @@ export const RescheduleTaskModal: React.FC<RescheduleTaskModalProps> = ({
                 </span>
               )}
             </div>
+            {(() => {
+              const rolloverInfo = getTaskOverdueRolloverInfo(task);
+              if (!rolloverInfo) return null;
+              return (
+                <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>Ogohlantirish:</strong> Ushbu vazifa ilgari bajarilmay qolgani sababli <strong>{rolloverInfo.timesRolled} marta</strong> kechiktirilgan.
+                  </span>
+                </div>
+              );
+            })()}
           </div>
 
           {/* New Date Picker & Quick Options */}

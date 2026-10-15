@@ -1,6 +1,12 @@
 import React, { useState, useMemo } from "react";
 import { Task, TaskPriority } from "../types";
-import { formatDateUz, getTodayString, getCreatorLabel, formatTaskScheduleDisplay } from "../services/storage";
+import {
+  formatDateUz,
+  getTodayString,
+  getCreatorLabel,
+  formatTaskScheduleDisplay,
+  getTaskOverdueRolloverInfo,
+} from "../services/storage";
 import { exportTasksToExcel } from "../services/excelExport";
 import { getPriorityBadge } from "./TaskCard";
 import {
@@ -99,6 +105,10 @@ export const TaskTable: React.FC<TaskTableProps> = ({
       }
       if (statusFilter === "completed" && !task.isCompleted) {
         return false;
+      }
+      if (statusFilter === "auto_rolled") {
+        const rollover = getTaskOverdueRolloverInfo(task);
+        if (!rollover || task.isCompleted) return false;
       }
       if (statusFilter === "rescheduled" && (!task.history || task.history.length === 0)) {
         return false;
@@ -327,6 +337,7 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                 <option value="all">Barcha holatlar</option>
                 <option value="pending">Kutilayotgan (Bajarilmagan)</option>
                 <option value="completed">Bajarilgan</option>
+                <option value="auto_rolled">⚠️ Bajarilmay o'tganlar (Kechikkan)</option>
                 <option value="rescheduled">Ko'chirilganlar</option>
                 <option value="overdue">Muddati o'tganlar</option>
               </select>
@@ -418,6 +429,7 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                 const scheduleMeta = formatTaskScheduleDisplay(task);
                 const isOverdue = !task.isCompleted && task.dueDate < todayStr;
                 const isToday = !task.isCompleted && task.dueDate === todayStr;
+                const rolloverInfo = getTaskOverdueRolloverInfo(task);
                 const creatorInfo = getCreatorLabel(task.createdBy);
                 const steps = task.steps || [];
                 const completedSteps = steps.filter((s) => s.completed).length;
@@ -430,6 +442,8 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                     className={`hover:bg-slate-50/90 transition-colors ${
                       task.isCompleted
                         ? "bg-slate-50/40 text-slate-600"
+                        : rolloverInfo
+                        ? "bg-amber-50/30"
                         : isOverdue
                         ? "bg-rose-50/20"
                         : isToday
@@ -506,6 +520,19 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                             </span>
                           )}
                         </div>
+
+                        {/* Rollover badge if delayed / carried over */}
+                        {rolloverInfo && (
+                          <div className="pt-0.5">
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs"
+                              title={rolloverInfo.detailedNotice}
+                            >
+                              <AlertTriangle className="w-2.5 h-2.5 mr-1 text-amber-600 shrink-0" />
+                              Oldingi kundan bajarilmay o'tgan ({rolloverInfo.timesRolled}-marta kechikkan)
+                            </span>
+                          </div>
+                        )}
 
                         {/* Notes / Reschedule info if exists */}
                         {(task.completionNote || lastHistory) && (
@@ -646,6 +673,16 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
                           <CheckCheck className="w-3 h-3 mr-1" /> Bajarildi
                         </span>
+                      ) : rolloverInfo ? (
+                        <div className="space-y-0.5">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-black bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs">
+                            <AlertTriangle className="w-3 h-3 mr-1 text-amber-600" />
+                            Kechikkan ({rolloverInfo.timesRolled}x)
+                          </span>
+                          <div className="text-[10px] font-bold text-amber-800 pl-0.5">
+                            Bajarilmay o'tgan
+                          </div>
+                        </div>
                       ) : isOverdue ? (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800">
                           <AlertTriangle className="w-3 h-3 mr-1" /> Kechikkan

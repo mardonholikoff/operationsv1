@@ -12,9 +12,11 @@ import {
   TrendingUp,
   RotateCcw,
   Zap,
+  AlertTriangle,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { getTaskEstimatedMinutes, formatMinutesUz } from "../services/workload";
+import { getTaskOverdueRolloverInfo } from "../services/storage";
 
 interface CompleteTaskModalProps {
   isOpen: boolean;
@@ -42,6 +44,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
   if (!isOpen || !task) return null;
 
   const plannedMinutes = getTaskEstimatedMinutes(task);
+  const rolloverInfo = getTaskOverdueRolloverInfo(task);
 
   // Foydalanuvchi kiritgan raqamni hisoblash
   const parsedActual = actualMinutesInput.trim() !== "" ? parseInt(actualMinutesInput, 10) : undefined;
@@ -125,6 +128,15 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
                 {task.priority}
               </span>
             </div>
+
+            {rolloverInfo && (
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="leading-snug">
+                  <strong>Kechiktirilgan vazifa:</strong> Ushbu vazifa oldingi kundan bajarilmay qolib o'tgan (Jami <strong>{rolloverInfo.timesRolled} marta</strong> kechiktirilgan).
+                </span>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-600 border-t border-slate-200/70">
               <span className="flex items-center">

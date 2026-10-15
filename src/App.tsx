@@ -17,6 +17,7 @@ import {
   subscribeToTasksFirestore,
   subscribeToLogsFirestore,
   saveTaskFirestore,
+  saveTasksBatchFirestore,
   deleteTaskFirestore,
   saveActivityLogFirestore,
   clearAllLogsFirestore,
@@ -136,11 +137,21 @@ export function App() {
     const initialLocalTasks = getStoredTasks();
     const initialLocalLogs = getStoredLogs();
 
-    const { updatedTasks, rolledCount } = checkAndPerformAutoRollover(initialLocalTasks);
+    const { updatedTasks, rolledCount, changedTasks } = checkAndPerformAutoRollover(initialLocalTasks);
     setTasks(updatedTasks);
     setLogs(initialLocalLogs);
     setRolledOverCount(rolledCount);
     setPendingCount(getPendingQueueCount());
+
+    if (changedTasks.length > 0) {
+      if (navigator.onLine) {
+        saveTasksBatchFirestore(changedTasks).catch(() => {
+          changedTasks.forEach((t) => enqueueSaveTask(t));
+        });
+      } else {
+        changedTasks.forEach((t) => enqueueSaveTask(t));
+      }
+    }
 
     // 2. If online, flush any pending offline mutations immediately
     if (navigator.onLine) {
@@ -154,8 +165,23 @@ export function App() {
         if (Array.isArray(firestoreTasks)) {
           // Merge with any local pending un-flushed offline tasks
           const merged = mergeWithOfflineQueue(firestoreTasks);
-          setTasks(merged);
-          saveStoredTasks(merged);
+          // Automatically roll over any uncompleted overdue tasks arriving from Firestore
+          const { updatedTasks: rolledMerged, rolledCount: incomingRolled, changedTasks: incomingChanged } =
+            checkAndPerformAutoRollover(merged);
+
+          setTasks(rolledMerged);
+          saveStoredTasks(rolledMerged);
+
+          if (incomingRolled > 0 && incomingChanged.length > 0) {
+            setRolledOverCount((prev) => prev + incomingRolled);
+            if (navigator.onLine) {
+              saveTasksBatchFirestore(incomingChanged).catch(() => {
+                incomingChanged.forEach((t) => enqueueSaveTask(t));
+              });
+            } else {
+              incomingChanged.forEach((t) => enqueueSaveTask(t));
+            }
+          }
         }
       },
       (error) => {
@@ -188,19 +214,76 @@ export function App() {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // Periodic check to flush offline items if online (e.g. when mobile browser or PWA resumes from background)
+    // Periodic check to flush offline items if online
     const syncInterval = setInterval(() => {
       if (navigator.onLine && getPendingQueueCount() > 0) {
         triggerFlushOffline();
       }
     }, 4000);
 
+    // Periodic check (every 15 seconds) to immediately roll over uncompleted overdue tasks (e.g. at midnight or day rollover)
+    const rolloverInterval = setInterval(() => {
+      setTasks((currentTasks) => {
+        const today = getTodayString();
+        const hasOverdueUncompleted = currentTasks.some(
+          (t) => !t.isCompleted && t.dueDate < today
+        );
+        if (hasOverdueUncompleted) {
+          const { updatedTasks: rolled, rolledCount: count, changedTasks: changed } =
+            checkAndPerformAutoRollover(currentTasks);
+          if (count > 0 && changed.length > 0) {
+            setRolledOverCount((prev) => prev + count);
+            if (navigator.onLine) {
+              saveTasksBatchFirestore(changed).catch(() => {
+                changed.forEach((t) => enqueueSaveTask(t));
+              });
+            } else {
+              changed.forEach((t) => enqueueSaveTask(t));
+            }
+            return rolled;
+          }
+        }
+        return currentTasks;
+      });
+    }, 15000);
+
+    const handleVisibilityOrFocus = () => {
+      setTasks((currentTasks) => {
+        const today = getTodayString();
+        const hasOverdueUncompleted = currentTasks.some(
+          (t) => !t.isCompleted && t.dueDate < today
+        );
+        if (hasOverdueUncompleted) {
+          const { updatedTasks: rolled, rolledCount: count, changedTasks: changed } =
+            checkAndPerformAutoRollover(currentTasks);
+          if (count > 0 && changed.length > 0) {
+            setRolledOverCount((prev) => prev + count);
+            if (navigator.onLine) {
+              saveTasksBatchFirestore(changed).catch(() => {
+                changed.forEach((t) => enqueueSaveTask(t));
+              });
+            } else {
+              changed.forEach((t) => enqueueSaveTask(t));
+            }
+            return rolled;
+          }
+        }
+        return currentTasks;
+      });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+
     return () => {
       unsubscribeTasks();
       unsubscribeLogs();
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
       clearInterval(syncInterval);
+      clearInterval(rolloverInterval);
     };
   }, [triggerFlushOffline, mergeWithOfflineQueue]);
 

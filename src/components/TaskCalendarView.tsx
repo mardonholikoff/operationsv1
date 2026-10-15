@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Task } from "../types";
-import { getTodayString, formatDateUz } from "../services/storage";
+import { getTodayString, formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
 import { getPriorityBadge } from "./TaskCard";
 import { HourlyTimeline } from "./HourlyTimeline";
 import { DayWorkloadAnalytics } from "./DayWorkloadAnalytics";
@@ -308,6 +308,10 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
               barColor = "bg-emerald-500";
             }
 
+            const rolledTasksCount = cell.tasksOnDay.filter(
+              (t) => !t.isCompleted && getTaskOverdueRolloverInfo(t)
+            ).length;
+
             return (
               <div
                 key={cell.dateStr}
@@ -341,11 +345,28 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
 
                     {/* Status badges: Workload % badge */}
                     <div className="flex items-center space-x-1">
+                      {rolledTasksCount > 0 && (
+                        <span
+                          className="text-[9px] px-1 py-0.2 bg-amber-100 text-amber-950 border border-amber-300 rounded font-black flex items-center gap-0.5"
+                          title={`${rolledTasksCount} ta vazifa bajarilmasdan o'tgan`}
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                          {rolledTasksCount}
+                        </span>
+                      )}
                       {hasTaxTask && (
                         <span
                           className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"
                           title="Muhim Soliq vazifasi bor"
                         />
+                      )}
+                      {cell.tasksOnDay.some((t) => !t.isCompleted && getTaskOverdueRolloverInfo(t)) && (
+                        <span
+                          className="text-[9px] px-1.5 py-0.2 bg-amber-100 text-amber-950 border border-amber-300 rounded-md font-black flex items-center shadow-2xs"
+                          title={`${cell.tasksOnDay.filter((t) => !t.isCompleted && getTaskOverdueRolloverInfo(t)).length} ta bajarilmasdan o'tgan vazifa`}
+                        >
+                          ⚠️{cell.tasksOnDay.filter((t) => !t.isCompleted && getTaskOverdueRolloverInfo(t)).length}x
+                        </span>
                       )}
                       {isPastOverdue && (
                         <span
@@ -384,16 +405,24 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
                 <div className="space-y-1 flex-1 overflow-hidden">
                   {cell.tasksOnDay.slice(0, 2).map((t) => {
                     const badge = getPriorityBadge(t.priority);
+                    const rollover = getTaskOverdueRolloverInfo(t);
                     return (
                       <div
                         key={t.id}
                         className={`px-1.5 py-0.5 rounded text-[10px] font-semibold truncate flex items-center space-x-1 border ${
                           t.isCompleted
                             ? "bg-emerald-50 text-emerald-800 border-emerald-200/80 line-through opacity-75"
+                            : rollover
+                            ? "bg-amber-100/90 text-amber-950 border-amber-300 font-bold"
                             : `${badge.bg}`
                         }`}
-                        title={`${t.dueTime ? t.dueTime + " - " : ""}${t.title}`}
+                        title={`${rollover ? `[${rollover.timesRolled}x kechikkan] ` : ""}${t.dueTime ? t.dueTime + " - " : ""}${t.title}`}
                       >
+                        {rollover && !t.isCompleted && (
+                          <span className="text-[9px] font-black text-amber-700 shrink-0">
+                            ⚠️{rollover.timesRolled}x
+                          </span>
+                        )}
                         {t.dueTime && (
                           <span className="font-bold shrink-0">{t.dueTime}</span>
                         )}
