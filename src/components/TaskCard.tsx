@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Task, TaskPriority } from "../types";
 import {
   formatDateUz,
+  formatCreatedAtUz,
   getTodayString,
   formatTaskScheduleDisplay,
   getCreatorLabel,
@@ -24,7 +25,8 @@ import {
   Info,
   ArrowRight,
   UserCheck,
-  ShieldCheck
+  ShieldCheck,
+  CalendarPlus
 } from "lucide-react";
 
 interface TaskCardProps {
@@ -499,8 +501,13 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           )}
         </div>
 
-        <span className="text-[11px] text-slate-400 font-medium shrink-0">
-          {task.createdAt ? formatDateUz(task.createdAt.split("T")[0]) : ""}
+        <span
+          id={`task-created-at-${task.id}`}
+          className="inline-flex items-center text-[11px] text-slate-500 font-medium shrink-0 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/80"
+          title="Vazifa tizimga kiritilgan (yaratilgan) vaqti"
+        >
+          <CalendarPlus className="w-3 h-3 mr-1 text-slate-400 shrink-0" />
+          Yaratilgan: <strong className="text-slate-700 ml-1">{formatCreatedAtUz(task.createdAt, task.id)}</strong>
         </span>
       </div>
     </div>

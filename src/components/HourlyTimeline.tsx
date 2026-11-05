@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Task, TaskStep } from "../types";
 import { getPriorityBadge } from "./TaskCard";
-import { formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
+import { formatDateUz, formatCreatedAtUz, getTaskOverdueRolloverInfo } from "../services/storage";
 import { StepCompleteModal } from "./StepCompleteModal";
 import {
   Clock,
@@ -14,7 +14,8 @@ import {
   MoreVertical,
   Edit2,
   Trash2,
-  Check
+  Check,
+  CalendarPlus
 } from "lucide-react";
 
 interface HourlyTimelineProps {
@@ -184,6 +185,14 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                       <CalendarClock className="w-3.5 h-3.5" />
                     </button>
                   </div>
+                </div>
+
+                {/* Yaratilgan vaqti */}
+                <div className="pt-1.5 mt-1.5 border-t border-slate-100/90 flex items-center text-[10px] text-slate-500 font-medium">
+                  <CalendarPlus className="w-3 h-3 mr-1 text-slate-400 shrink-0" />
+                  <span>
+                    Yaratilgan: <strong className="text-slate-700 font-semibold">{formatCreatedAtUz(task.createdAt, task.id)}</strong>
+                  </span>
                 </div>
               </div>
             );
@@ -438,6 +447,19 @@ export const HourlyTimeline: React.FC<HourlyTimelineProps> = ({
                                   <Edit2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
+                            </div>
+
+                            {/* Pastki qism: Yaratilgan vaqti */}
+                            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                              <span className="flex items-center">
+                                <CalendarPlus className="w-3 h-3 mr-1 text-slate-400 shrink-0" />
+                                Yaratilgan: <strong className="text-slate-700 ml-1 font-semibold">{formatCreatedAtUz(task.createdAt, task.id)}</strong>
+                              </span>
+                              {task.createdBy && (
+                                <span className="text-[9px] text-slate-400">
+                                  {task.createdBy === "admin" ? "admin" : task.createdBy}
+                                </span>
+                              )}
                             </div>
                           </div>
                         );

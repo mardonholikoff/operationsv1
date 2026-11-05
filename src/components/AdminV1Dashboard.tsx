@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Task } from "../types";
-import { formatDateUz, getTodayString, getTaskOverdueRolloverInfo } from "../services/storage";
+import { formatDateUz, formatCreatedAtUz, getTodayString, getTaskOverdueRolloverInfo } from "../services/storage";
 import {
   DAILY_WORK_HOURS,
   DAILY_WORK_MINUTES,
@@ -33,6 +33,7 @@ import {
   Zap,
   Info,
   RotateCcw,
+  CalendarPlus
 } from "lucide-react";
 
 interface AdminV1DashboardProps {
@@ -632,6 +633,19 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
                             style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
                           />
                         </div>
+
+                        {/* Pastki qism: Yaratilgan vaqti */}
+                        <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                          <span className="flex items-center">
+                            <CalendarPlus className="w-3 h-3 mr-1 text-slate-400 shrink-0" />
+                            Yaratilgan: <strong className="text-slate-700 ml-1 font-semibold">{formatCreatedAtUz(task.createdAt, task.id)}</strong>
+                          </span>
+                          {task.createdBy && (
+                            <span className="text-[9px] text-slate-400 truncate max-w-[120px]">
+                              {task.createdBy === "admin" ? "admin" : task.createdBy}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -967,6 +981,19 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
                             className="h-full bg-indigo-600 rounded-full"
                             style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
                           />
+                        </div>
+
+                        {/* Pastki qism: Yaratilgan vaqti */}
+                        <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                          <span className="flex items-center">
+                            <CalendarPlus className="w-3 h-3 mr-1 text-slate-400 shrink-0" />
+                            Yaratilgan: <strong className="text-slate-700 ml-1 font-semibold">{formatCreatedAtUz(task.createdAt, task.id)}</strong>
+                          </span>
+                          {task.createdBy && (
+                            <span className="text-[9px] text-slate-400 truncate max-w-[120px]">
+                              {task.createdBy === "admin" ? "admin" : task.createdBy}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -1332,6 +1359,19 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
                                 className="h-full bg-purple-600 rounded-full"
                                 style={{ width: `${Math.min(100, percentageOfTotal)}%` }}
                               />
+                            </div>
+
+                            {/* Pastki qism: Yaratilgan vaqti */}
+                            <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                              <span className="flex items-center">
+                                <CalendarPlus className="w-3 h-3 mr-1 text-slate-400 shrink-0" />
+                                Yaratilgan: <strong className="text-slate-700 ml-1 font-semibold">{formatCreatedAtUz(task.createdAt, task.id)}</strong>
+                              </span>
+                              {task.createdBy && (
+                                <span className="text-[9px] text-slate-400 truncate max-w-[120px]">
+                                  {task.createdBy === "admin" ? "admin" : task.createdBy}
+                                </span>
+                              )}
                             </div>
                           </div>
                         );

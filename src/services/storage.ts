@@ -4,6 +4,8 @@ const STORAGE_KEY_TASKS = "vazifalar_tasks_v3";
 const STORAGE_KEY_LOGS = "vazifalar_activity_logs_v3";
 const STORAGE_KEY_LAST_SYNC = "vazifalar_last_sync_v3";
 const STORAGE_KEY_TEMPLATES_HISTORY = "vazifalar_templates_history_v3";
+const STORAGE_KEY_DELETED_IDS = "vazifalar_deleted_task_ids_v3";
+const STORAGE_KEY_COMPLETED_IDS = "vazifalar_completed_task_ids_v3";
 
 export interface TaskTemplateItem {
   id: string;
@@ -244,7 +246,10 @@ export function getAllTaskTemplates(existingTasks?: Task[]): TaskTemplateItem[] 
 
 export function getTodayString(): string {
   const d = new Date();
-  return d.toISOString().split("T")[0];
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 export function formatDateUz(dateStr: string): string {
@@ -267,6 +272,40 @@ export function formatDateUz(dateStr: string): string {
     // fallback
   }
   return dateStr;
+}
+
+export function formatCreatedAtUz(dateStr?: string, id?: string): string {
+  if (!dateStr && !id) return "-";
+  let date: Date | null = null;
+  if (dateStr) {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      date = d;
+    }
+  }
+  if (!date && id) {
+    const match = id.match(/(\d{12,14})/);
+    if (match) {
+      const ts = parseInt(match[1], 10);
+      const d = new Date(ts);
+      if (!isNaN(d.getTime())) {
+        date = d;
+      }
+    }
+  }
+  if (!date) return dateStr ? formatDateUz(dateStr) : "-";
+
+  const monthsUz = [
+    "Yan", "Fev", "Mar", "Apr", "May", "Iyun",
+    "Iyul", "Avg", "Sen", "Okt", "Noy", "Dek"
+  ];
+  const day = date.getDate();
+  const monthName = monthsUz[date.getMonth()];
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${day}-${monthName}, ${year} ${hours}:${minutes}`;
 }
 
 export function addDaysToDate(dateStr: string, days: number): string {
@@ -494,6 +533,81 @@ export function calculateTaskStatus(task: Task): "pending" | "completed" | "resc
   return "pending";
 }
 
+export function getDeletedTaskIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_DELETED_IDS);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function markTasksAsDeleted(taskIds: string[]): void {
+  if (!taskIds || taskIds.length === 0) return;
+  try {
+    const deletedSet = getDeletedTaskIds();
+    taskIds.forEach((id) => {
+      if (id) deletedSet.add(id);
+    });
+    const arr = Array.from(deletedSet);
+    // Keep up to 2000 recent deleted IDs
+    const trimmed = arr.length > 2000 ? arr.slice(arr.length - 2000) : arr;
+    localStorage.setItem(STORAGE_KEY_DELETED_IDS, JSON.stringify(trimmed));
+
+    // Also remove from completed set if present
+    const compSet = getCompletedTaskIds();
+    let compChanged = false;
+    taskIds.forEach((id) => {
+      if (compSet.delete(id)) compChanged = true;
+    });
+    if (compChanged) {
+      localStorage.setItem(STORAGE_KEY_COMPLETED_IDS, JSON.stringify(Array.from(compSet)));
+    }
+  } catch (e) {
+    console.error("Failed to record deleted task IDs:", e);
+  }
+}
+
+export function getCompletedTaskIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_COMPLETED_IDS);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function markTasksAsCompleted(taskIds: string[]): void {
+  if (!taskIds || taskIds.length === 0) return;
+  try {
+    const compSet = getCompletedTaskIds();
+    taskIds.forEach((id) => {
+      if (id) compSet.add(id);
+    });
+    const arr = Array.from(compSet);
+    const trimmed = arr.length > 2000 ? arr.slice(arr.length - 2000) : arr;
+    localStorage.setItem(STORAGE_KEY_COMPLETED_IDS, JSON.stringify(trimmed));
+  } catch (e) {
+    console.error("Failed to record completed task IDs:", e);
+  }
+}
+
+export function unmarkTaskCompleted(taskId: string): void {
+  if (!taskId) return;
+  try {
+    const compSet = getCompletedTaskIds();
+    if (compSet.delete(taskId)) {
+      localStorage.setItem(STORAGE_KEY_COMPLETED_IDS, JSON.stringify(Array.from(compSet)));
+    }
+  } catch (e) {
+    console.error("Failed to unmark completed task ID:", e);
+  }
+}
+
 export function getStoredTasks(): Task[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_TASKS);
@@ -502,7 +616,16 @@ export function getStoredTasks(): Task[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed;
+      const deletedSet = getDeletedTaskIds();
+      const compSet = getCompletedTaskIds();
+      return parsed
+        .filter((t: Task) => t && t.id && !deletedSet.has(t.id))
+        .map((t: Task) => {
+          if (compSet.has(t.id) && !t.isCompleted) {
+            return { ...t, isCompleted: true, status: "completed" as const };
+          }
+          return t;
+        });
     }
   } catch (e) {
     console.error("Failed to read tasks from localStorage:", e);
@@ -512,7 +635,9 @@ export function getStoredTasks(): Task[] {
 
 export function saveStoredTasks(tasks: Task[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(tasks));
+    const deletedSet = getDeletedTaskIds();
+    const filtered = (tasks || []).filter((t) => t && t.id && !deletedSet.has(t.id));
+    localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(filtered));
   } catch (e) {
     console.error("Failed to save tasks:", e);
   }
@@ -624,12 +749,41 @@ export function checkAndPerformAutoRollover(tasks: Task[]): {
   changedTasks: Task[];
 } {
   const today = getTodayString();
+  const deletedSet = getDeletedTaskIds();
+  const completedSet = getCompletedTaskIds();
   const changedTasks: Task[] = [];
   let rolledCount = 0;
 
-  const updatedTasks = tasks.map((task) => {
+  // First filter out any deleted tasks
+  const activeTasks = (tasks || []).filter((t) => t && t.id && !deletedSet.has(t.id));
+
+  const updatedTasks = activeTasks.map((task) => {
+    // If task was marked completed in local completedSet, ensure it stays completed
+    if (completedSet.has(task.id) && !task.isCompleted) {
+      const fixedCompleted: Task = {
+        ...task,
+        isCompleted: true,
+        status: "completed" as const,
+      };
+      changedTasks.push(fixedCompleted);
+      return fixedCompleted;
+    }
+
     // If completed or not past due, do not touch
-    if (task.isCompleted || task.dueDate >= today) {
+    if (task.isCompleted || task.status === "completed" || task.dueDate >= today) {
+      return task;
+    }
+
+    // If already rolled over to today, do not roll over again
+    if (
+      task.lastRolledDate === today ||
+      task.history?.some((h) => h.isAutomatic && h.newDate === today)
+    ) {
+      if (task.dueDate < today) {
+        const fixedDateTask: Task = { ...task, dueDate: today };
+        changedTasks.push(fixedDateTask);
+        return fixedDateTask;
+      }
       return task;
     }
 
@@ -648,12 +802,11 @@ export function checkAndPerformAutoRollover(tasks: Task[]): {
     const autoCount = Math.max(prevAuto, prevHist) + 1;
     const originalDueDate = task.originalDueDate || oldDate;
 
-    const historyItem = {
+    const historyItem: NonNullable<Task["history"]>[number] = {
       id: "hist-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
       oldDate,
       newDate: today,
-      oldTime: task.dueTime,
-      newTime: task.dueTime,
+      ...(task.dueTime ? { oldTime: task.dueTime, newTime: task.dueTime } : {}),
       reason: `Oldingi kunda bajarilmay qoldirilgani sababli avtomatik bugungi kunga o'tkazildi (${autoCount}-marta kechikish)`,
       rescheduledAt: new Date().toISOString(),
       operator: "Tizim (Avtomatik)",
@@ -686,7 +839,7 @@ export function checkAndPerformAutoRollover(tasks: Task[]): {
     return rolledTask;
   });
 
-  if (rolledCount > 0) {
+  if (rolledCount > 0 || changedTasks.length > 0) {
     saveStoredTasks(updatedTasks);
   }
 

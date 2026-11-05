@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Task, TaskPriority } from "../types";
 import {
   formatDateUz,
+  formatCreatedAtUz,
   getTodayString,
   getCreatorLabel,
   formatTaskScheduleDisplay,
@@ -30,7 +31,8 @@ import {
   CheckCheck,
   AlertTriangle,
   UserCheck,
-  ShieldCheck
+  ShieldCheck,
+  CalendarPlus
 } from "lucide-react";
 
 interface TaskTableProps {
@@ -41,6 +43,8 @@ interface TaskTableProps {
   onEditTask: (task: Task) => void;
   onDeleteTask: (taskId: string) => void;
   onOpenNewTask: () => void;
+  onBulkCompleteTasks?: (taskIds: string[], note?: string) => void;
+  onBulkDeleteTasks?: (taskIds: string[]) => void;
 }
 
 const ALL_PRIORITIES: TaskPriority[] = [
@@ -61,6 +65,8 @@ export const TaskTable: React.FC<TaskTableProps> = ({
   onEditTask,
   onDeleteTask,
   onOpenNewTask,
+  onBulkCompleteTasks,
+  onBulkDeleteTasks,
 }) => {
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
@@ -71,6 +77,8 @@ export const TaskTable: React.FC<TaskTableProps> = ({
   const [customEndDate, setCustomEndDate] = useState("");
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [isExporting, setIsExporting] = useState(false);
+  const [bulkActionMode, setBulkActionMode] = useState<"none" | "confirm_complete" | "confirm_delete">("none");
+  const [bulkCompleteNote, setBulkCompleteNote] = useState("");
 
   const todayStr = getTodayString();
 
@@ -167,18 +175,69 @@ export const TaskTable: React.FC<TaskTableProps> = ({
     }, 400);
   };
 
+  const validSelectedIds = useMemo(() => {
+    const taskMap = new Set(tasks.map((t) => t.id));
+    return selectedTaskIds.filter((id) => taskMap.has(id));
+  }, [selectedTaskIds, tasks]);
+
+  const isAllFilteredSelected =
+    filteredTasks.length > 0 &&
+    filteredTasks.every((t) => validSelectedIds.includes(t.id));
+
+  const selectedTasksList = useMemo(() => {
+    const set = new Set(validSelectedIds);
+    return tasks.filter((t) => set.has(t.id));
+  }, [tasks, validSelectedIds]);
+
+  const selectedUncompletedIds = useMemo(() => {
+    return selectedTasksList.filter((t) => !t.isCompleted).map((t) => t.id);
+  }, [selectedTasksList]);
+
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedTaskIds(filteredTasks.map((t) => t.id));
+      const merged = new Set([...validSelectedIds, ...filteredTasks.map((t) => t.id)]);
+      setSelectedTaskIds(Array.from(merged));
     } else {
-      setSelectedTaskIds([]);
+      const filteredSet = new Set(filteredTasks.map((t) => t.id));
+      setSelectedTaskIds(validSelectedIds.filter((id) => !filteredSet.has(id)));
+      setBulkActionMode("none");
     }
   };
 
   const handleToggleSelectOne = (id: string) => {
-    setSelectedTaskIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
+    setSelectedTaskIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id];
+      if (next.length === 0) setBulkActionMode("none");
+      return next;
+    });
+  };
+
+  const handleExecuteBulkComplete = () => {
+    const targetIds = selectedUncompletedIds.length > 0 ? selectedUncompletedIds : validSelectedIds;
+    if (targetIds.length === 0) return;
+
+    if (onBulkCompleteTasks) {
+      onBulkCompleteTasks(targetIds, bulkCompleteNote.trim() || "Jadval orqali ommaviy bajarildi deb belgilandi");
+    } else {
+      targetIds.forEach((id) => {
+        const found = tasks.find((t) => t.id === id);
+        if (found) onOpenCompleteModal(found);
+      });
+    }
+    setSelectedTaskIds([]);
+    setBulkActionMode("none");
+    setBulkCompleteNote("");
+  };
+
+  const handleExecuteBulkDelete = () => {
+    if (validSelectedIds.length === 0) return;
+    if (onBulkDeleteTasks) {
+      onBulkDeleteTasks(validSelectedIds);
+    } else {
+      validSelectedIds.forEach((id) => onDeleteTask(id));
+    }
+    setSelectedTaskIds([]);
+    setBulkActionMode("none");
   };
 
   const handleResetFilters = () => {
@@ -371,21 +430,32 @@ export const TaskTable: React.FC<TaskTableProps> = ({
 
         {/* Filter Summary & Reset */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center space-x-2 cursor-pointer select-none bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1 rounded-lg text-slate-700 font-bold transition-colors">
+              <input
+                id="checkbox-select-all-bar"
+                type="checkbox"
+                checked={isAllFilteredSelected}
+                onChange={(e) => handleSelectAll(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <span>Barchasini tanlash ({filteredTasks.length})</span>
+            </label>
+            <span>•</span>
             <span>
               Topildi: <strong className="text-slate-800 font-bold">{filteredTasks.length}</strong> ta vazifa
             </span>
             <span>•</span>
-            <span className="text-emerald-700">
+            <span className="text-emerald-700 font-semibold">
               Bajarilgan: {filteredTasks.filter((t) => t.isCompleted).length} ta
             </span>
             <span>•</span>
-            <span className="text-rose-700">
+            <span className="text-rose-700 font-semibold">
               Soliqlar: {filteredTasks.filter((t) => t.priority.includes("Soliq")).length} ta
             </span>
           </div>
 
-          {(search || priorityFilter !== "all" || statusFilter !== "all" || dateFilter !== "all") && (
+          {(search || priorityFilter !== "all" || statusFilter !== "all" || scheduleFilter !== "all" || dateFilter !== "all") && (
             <button
               onClick={handleResetFilters}
               className="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
@@ -397,17 +467,164 @@ export const TaskTable: React.FC<TaskTableProps> = ({
         </div>
       </div>
 
+      {/* Ommaviy Amallar Paneli (Bir nechta vazifa tanlanganda chiqadi) */}
+      {validSelectedIds.length > 0 && (
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white p-4 rounded-2xl shadow-lg border border-blue-800/60 space-y-3 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-blue-600 text-white font-black text-sm shadow-xs">
+                {validSelectedIds.length}
+              </span>
+              <div>
+                <div className="text-xs sm:text-sm font-extrabold text-white">
+                  {validSelectedIds.length} ta vazifa tanlandi
+                </div>
+                <div className="text-[11px] text-blue-200">
+                  {selectedUncompletedIds.length > 0
+                    ? `${selectedUncompletedIds.length} ta bajarilmagan • ${validSelectedIds.length - selectedUncompletedIds.length} ta bajarilgan`
+                    : "Barcha tanlangan vazifalar bajarilgan"}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Bulk Complete Button */}
+              {selectedUncompletedIds.length > 0 && (
+                <button
+                  id="btn-bulk-complete-trigger"
+                  type="button"
+                  onClick={() =>
+                    setBulkActionMode(
+                      bulkActionMode === "confirm_complete" ? "none" : "confirm_complete"
+                    )
+                  }
+                  className="inline-flex items-center px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                  Bajarildi deb belgilash ({selectedUncompletedIds.length})
+                </button>
+              )}
+
+              {/* Bulk Delete Button */}
+              <button
+                id="btn-bulk-delete-trigger"
+                type="button"
+                onClick={() =>
+                  setBulkActionMode(
+                    bulkActionMode === "confirm_delete" ? "none" : "confirm_delete"
+                  )
+                }
+                className="inline-flex items-center px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4 mr-1.5" />
+                Tanlanganlarni o'chirish ({validSelectedIds.length})
+              </button>
+
+              {/* Clear Selection */}
+              <button
+                id="btn-bulk-clear-selection"
+                type="button"
+                onClick={() => {
+                  setSelectedTaskIds([]);
+                  setBulkActionMode("none");
+                }}
+                className="inline-flex items-center px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-semibold transition-all cursor-pointer"
+              >
+                Bekor qilish
+              </button>
+            </div>
+          </div>
+
+          {/* Inline Confirmation for Bulk Complete */}
+          {bulkActionMode === "confirm_complete" && (
+            <div className="p-3.5 rounded-xl bg-emerald-950/90 border border-emerald-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex-1 space-y-1.5">
+                <div className="text-xs font-bold text-emerald-200 flex items-center">
+                  <CheckCheck className="w-4 h-4 mr-1.5 text-emerald-400" />
+                  Tanlangan {selectedUncompletedIds.length} ta vazifani birdaniga "Bajarildi" deb tasdiqlash:
+                </div>
+                <input
+                  type="text"
+                  value={bulkCompleteNote}
+                  onChange={(e) => setBulkCompleteNote(e.target.value)}
+                  placeholder="Umumiy izoh yozish (ixtiyoriy)..."
+                  className="w-full sm:max-w-md px-3 py-1.5 rounded-lg bg-white/95 text-slate-900 text-xs border border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                />
+              </div>
+              <div className="flex items-center space-x-2 self-end sm:self-center">
+                <button
+                  id="btn-bulk-complete-confirm"
+                  type="button"
+                  onClick={handleExecuteBulkComplete}
+                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs shadow-sm cursor-pointer transition-all"
+                >
+                  ✓ Ha, Bajarildi ({selectedUncompletedIds.length} ta)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkActionMode("none")}
+                  className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold cursor-pointer"
+                >
+                  Yopish
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Inline Confirmation for Bulk Delete */}
+          {bulkActionMode === "confirm_delete" && (
+            <div className="p-3.5 rounded-xl bg-rose-950/90 border border-rose-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-rose-100 flex items-center">
+                <AlertTriangle className="w-4 h-4 mr-2 text-rose-400 shrink-0" />
+                <span>
+                  Haqiqatan ham tanlangan <strong className="text-white font-black">{validSelectedIds.length} ta</strong> vazifani tizimdan butunlay o'chirib tashlamoqchimisiz?
+                </span>
+              </div>
+              <div className="flex items-center space-x-2 self-end sm:self-center shrink-0">
+                <button
+                  id="btn-bulk-delete-confirm"
+                  type="button"
+                  onClick={handleExecuteBulkDelete}
+                  className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-extrabold text-xs shadow-sm cursor-pointer transition-all"
+                >
+                  Ha, butunlay o'chirish ({validSelectedIds.length} ta)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkActionMode("none")}
+                  className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold cursor-pointer"
+                >
+                  Yo'q, qaytish
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main Compact Responsive Table (No Horizontal Scroll Needed) */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <table className="w-full text-left border-collapse text-xs sm:text-sm">
           <thead>
             <tr className="bg-slate-100/90 border-b border-slate-200 text-slate-700 font-bold uppercase tracking-wider text-[11px]">
-              <th className="py-3 px-3 w-9 text-center">№</th>
-              <th className="py-3 px-3">Vazifa, Muhimlik va Muallif</th>
+              <th className="py-3 px-3 w-16 text-center">
+                <div className="flex items-center justify-center gap-1.5">
+                  <input
+                    id="checkbox-select-all-thead"
+                    type="checkbox"
+                    checked={isAllFilteredSelected}
+                    onChange={(e) => handleSelectAll(e.target.checked)}
+                    title="Barcha vazifalarni tanlash / bekor qilish"
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>№</span>
+                </div>
+              </th>
+              <th className="py-3 px-3">Vazifa, Muhimlik va Yaratilgan Vaqti</th>
               <th className="py-3 px-3 w-44 hidden md:table-cell">Amallar (Bosqichlar)</th>
-              <th className="py-3 px-3 w-36 sm:w-40">Muddati va Soati</th>
+              <th className="py-3 px-3 w-36 sm:w-44">Muddati va Soati</th>
               <th className="py-3 px-3 w-28 sm:w-32">Holati</th>
-              <th className="py-3 px-3 text-right w-24 sm:w-28">Amallar</th>
+              <th className="py-3 px-3 text-right w-24 sm:w-28">Boshqaruv</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -435,38 +652,52 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                 const completedSteps = steps.filter((s) => s.completed).length;
                 const stepsPercent = steps.length > 0 ? Math.round((completedSteps / steps.length) * 100) : 0;
                 const lastHistory = task.history && task.history.length > 0 ? task.history[task.history.length - 1] : null;
+                const isSelected = validSelectedIds.includes(task.id);
+                const createdTimeFormatted = formatCreatedAtUz(task.createdAt, task.id);
 
                 return (
                   <tr
                     key={task.id}
-                    className={`hover:bg-slate-50/90 transition-colors ${
-                      task.isCompleted
-                        ? "bg-slate-50/40 text-slate-600"
+                    className={`transition-colors ${
+                      isSelected
+                        ? "bg-blue-50/80 hover:bg-blue-100/60"
+                        : task.isCompleted
+                        ? "bg-slate-50/40 text-slate-600 hover:bg-slate-50/90"
                         : rolloverInfo
-                        ? "bg-amber-50/30"
+                        ? "bg-amber-50/30 hover:bg-amber-50/60"
                         : isOverdue
-                        ? "bg-rose-50/20"
+                        ? "bg-rose-50/20 hover:bg-rose-50/40"
                         : isToday
-                        ? "bg-blue-50/20"
-                        : ""
+                        ? "bg-blue-50/20 hover:bg-blue-50/40"
+                        : "hover:bg-slate-50/90"
                     }`}
                   >
-                    {/* № & Quick Tick */}
+                    {/* Tanlash Checkbox & № & Quick Tick */}
                     <td className="py-3 px-3 text-center align-top">
-                      <div className="flex flex-col items-center justify-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => onOpenCompleteModal(task)}
-                          className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all cursor-pointer ${
-                            task.isCompleted
-                              ? "bg-emerald-500 border-emerald-600 text-white shadow-xs"
-                              : "border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 text-emerald-600"
-                          }`}
-                          title={task.isCompleted ? "Bajarilgan" : "Tick: Bajarildi deb belgilash va vaqtni kiritish"}
-                        >
-                          {task.isCompleted && <CheckCircle2 className="w-3.5 h-3.5" />}
-                        </button>
-                        <span className="text-[10px] font-bold text-slate-400">{index + 1}</span>
+                      <div className="flex flex-col items-center justify-center gap-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            id={`select-task-${task.id}`}
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectOne(task.id)}
+                            title="Bir nechta vazifani tanlash uchun belgilang"
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => onOpenCompleteModal(task)}
+                            className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all cursor-pointer ${
+                              task.isCompleted
+                                ? "bg-emerald-500 border-emerald-600 text-white shadow-xs"
+                                : "border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 text-emerald-600"
+                            }`}
+                            title={task.isCompleted ? "Bajarilgan" : "Tick: Bajarildi deb belgilash va vaqtni kiritish"}
+                          >
+                            {task.isCompleted && <CheckCircle2 className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400">#{index + 1}</span>
                       </div>
                     </td>
 
@@ -577,6 +808,20 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                             </div>
                           </div>
                         )}
+
+                        {/* Yaratilgan vaqti - jadval ko'rinishida har bir vazifa pastida avtomatik ko'rinadi */}
+                        <div className="pt-2 mt-1.5 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                          <span
+                            id={`table-task-created-at-${task.id}`}
+                            className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100/90 border border-slate-200/90 text-[11px] text-slate-600 font-medium"
+                          >
+                            <CalendarPlus className="w-3 h-3 mr-1 text-blue-600 shrink-0" />
+                            Yaratilgan vaqti:{" "}
+                            <strong className="text-slate-800 font-bold ml-1">
+                              {createdTimeFormatted}
+                            </strong>
+                          </span>
+                        </div>
                       </div>
                     </td>
 
@@ -665,6 +910,12 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                           )
                         )}
                       </div>
+                      <div className="mt-1.5 pt-1 border-t border-slate-100 text-[10px] text-slate-500 flex items-center">
+                        <CalendarPlus className="w-2.5 h-2.5 mr-1 text-slate-400 shrink-0" />
+                        <span className="truncate" title={`Yaratilgan: ${createdTimeFormatted}`}>
+                          Yaratildi: <strong className="text-slate-700">{createdTimeFormatted}</strong>
+                        </span>
+                      </div>
                     </td>
 
                     {/* Holati */}
@@ -741,6 +992,24 @@ export const TaskTable: React.FC<TaskTableProps> = ({
             )}
           </tbody>
         </table>
+
+        {/* Jadval pastki ma'lumot paneli (Footer) */}
+        <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-600">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center font-semibold text-slate-700">
+              <CalendarPlus className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+              Har bir vazifa qatori pastida uning tizimga kiritilgan (yaratilgan) aniq sanasi va soati avtomatik ko'rsatilgan.
+            </span>
+          </div>
+          <div className="flex items-center space-x-3 shrink-0 font-medium">
+            <span>Jami ko'rsatilmoqda: <strong className="text-slate-900">{filteredTasks.length} ta</strong></span>
+            {validSelectedIds.length > 0 && (
+              <span className="text-blue-700 font-bold bg-blue-100 px-2 py-0.5 rounded-md">
+                Tanlangan: {validSelectedIds.length} ta
+              </span>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

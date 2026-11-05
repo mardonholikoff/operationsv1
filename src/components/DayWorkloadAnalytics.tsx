@@ -8,7 +8,7 @@ import {
   getTaskEffectiveMinutes,
   formatMinutesUz
 } from "../services/workload";
-import { formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
+import { formatDateUz, formatCreatedAtUz, getTaskOverdueRolloverInfo } from "../services/storage";
 import { getPriorityBadge } from "./TaskCard";
 import { StepCompleteModal } from "./StepCompleteModal";
 import {
@@ -25,6 +25,7 @@ import {
   CheckCheck,
   CircleDot,
   Zap,
+  CalendarPlus
 } from "lucide-react";
 
 interface DayWorkloadAnalyticsProps {
@@ -502,6 +503,19 @@ export const DayWorkloadAnalytics: React.FC<DayWorkloadAnalyticsProps> = ({
                       (Ushbu vazifa uchun alohida kichik amallar belgilanmagan)
                     </div>
                   )}
+
+                  {/* Yaratilgan vaqti */}
+                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                    <span className="flex items-center">
+                      <CalendarPlus className="w-3.5 h-3.5 mr-1 text-slate-400 shrink-0" />
+                      Yaratilgan: <strong className="text-slate-700 ml-1 font-semibold">{formatCreatedAtUz(task.createdAt, task.id)}</strong>
+                    </span>
+                    {task.createdBy && (
+                      <span className="text-[10px] text-slate-400">
+                        {task.createdBy === "admin" ? "admin tomonidan" : task.createdBy}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}

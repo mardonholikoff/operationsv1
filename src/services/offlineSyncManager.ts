@@ -48,14 +48,22 @@ export function saveOfflineQueue(queue: OfflineMutation[]): void {
  */
 export function enqueueSaveTask(task: Task): void {
   const queue = getOfflineQueue();
-  // If there is already a pending save for this task, update it
-  const existingIdx = queue.findIndex(
-    (item) => item.type === "save_task" && item.task?.id === task.id
-  );
 
-  // If there was a pending delete for this task, remove it
+  // If there was a pending delete for this task, do not overwrite a deleted task
+  const hasPendingDelete = queue.some(
+    (item) => item.type === "delete_task" && item.taskId === task.id
+  );
+  if (hasPendingDelete && !task.isCompleted) {
+    return;
+  }
+
   const filtered = queue.filter(
     (item) => !(item.type === "delete_task" && item.taskId === task.id)
+  );
+
+  // If there is already a pending save for this task, update it in `filtered`
+  const existingIdx = filtered.findIndex(
+    (item) => item.type === "save_task" && item.task?.id === task.id
   );
 
   const mutation: OfflineMutation = {
@@ -79,9 +87,11 @@ export function enqueueSaveTask(task: Task): void {
  */
 export function enqueueDeleteTask(taskId: string): void {
   const queue = getOfflineQueue();
-  // Remove any pending saves for this task as it is now deleted
+  // Remove any pending saves or duplicate deletes for this task
   const filtered = queue.filter(
-    (item) => !(item.type === "save_task" && item.task?.id === taskId)
+    (item) =>
+      !(item.type === "save_task" && item.task?.id === taskId) &&
+      !(item.type === "delete_task" && item.taskId === taskId)
   );
 
   filtered.push({
@@ -89,6 +99,32 @@ export function enqueueDeleteTask(taskId: string): void {
     type: "delete_task",
     taskId,
     timestamp: new Date().toISOString(),
+  });
+
+  saveOfflineQueue(filtered);
+}
+
+/**
+ * Enqueue multiple task deletes when offline
+ */
+export function enqueueDeleteTasksBatch(taskIds: string[]): void {
+  if (!taskIds || taskIds.length === 0) return;
+  const idSet = new Set(taskIds);
+  const queue = getOfflineQueue();
+  const filtered = queue.filter(
+    (item) =>
+      !(item.type === "save_task" && item.task?.id && idSet.has(item.task.id)) &&
+      !(item.type === "delete_task" && item.taskId && idSet.has(item.taskId))
+  );
+
+  const nowIso = new Date().toISOString();
+  taskIds.forEach((taskId, idx) => {
+    filtered.push({
+      id: `mut-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
+      type: "delete_task",
+      taskId,
+      timestamp: nowIso,
+    });
   });
 
   saveOfflineQueue(filtered);

@@ -2,10 +2,10 @@ import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getAuth, signInAnonymously, Auth } from "firebase/auth";
 import {
   Firestore,
+  initializeFirestore,
   getFirestore,
   collection,
   doc,
-  getDoc,
   setDoc,
   deleteDoc,
   onSnapshot,
@@ -15,6 +15,7 @@ import {
   FirestoreError,
 } from "firebase/firestore";
 import { Task, ActivityLog } from "../types";
+import { getDeletedTaskIds } from "./storage";
 import firebaseConfigData from "../../firebase-applet-config.json";
 
 // Initialize Firebase App
@@ -45,19 +46,49 @@ try {
   console.warn("Auth initialization info:", e);
 }
 
-// Initialize Firestore for the specified databaseId
+// Initialize Firestore for the specified databaseId with ignoreUndefinedProperties
 const databaseId =
   firebaseConfigData.firestoreDatabaseId &&
   firebaseConfigData.firestoreDatabaseId !== "(default)"
     ? firebaseConfigData.firestoreDatabaseId
     : undefined;
 
-const db: Firestore = getFirestore(app, databaseId);
+let db: Firestore;
+try {
+  db = databaseId
+    ? initializeFirestore(app, { ignoreUndefinedProperties: true }, databaseId)
+    : initializeFirestore(app, { ignoreUndefinedProperties: true });
+} catch {
+  db = getFirestore(app, databaseId);
+}
 
 export { db, app, auth };
 
 const TASKS_COLLECTION = "tasks";
 const LOGS_COLLECTION = "activity_logs";
+
+/**
+ * Recursively strips `undefined` properties from any object/array before writing to Firestore
+ * so `setDoc` and `batch.set` never fail with `Unsupported field value: undefined`.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) return data;
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item)) as unknown as T;
+  }
+  if (typeof data === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      if (value !== undefined) {
+        result[key] = sanitizeForFirestore(value);
+      }
+    }
+    return result as T;
+  }
+  return data;
+}
 
 /**
  * Real-time listener for tasks collection with offline cache support
@@ -72,14 +103,29 @@ export function subscribeToTasksFirestore(
       tasksQuery,
       { includeMetadataChanges: true },
       (snapshot) => {
+        const deletedSet = getDeletedTaskIds();
         const tasks: Task[] = [];
+        const staleDeletedIds: string[] = [];
+
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as Task;
+          const id = docSnap.id || data.id;
+          if (deletedSet.has(id)) {
+            if (!snapshot.metadata.fromCache) {
+              staleDeletedIds.push(id);
+            }
+            return;
+          }
           tasks.push({
             ...data,
-            id: docSnap.id || data.id,
+            id,
           });
         });
+
+        // If any locally deleted task still exists in live Firestore, purge it
+        if (staleDeletedIds.length > 0) {
+          deleteTasksBatchFirestore(staleDeletedIds).catch(() => {});
+        }
 
         const isFromCache = snapshot.metadata.fromCache;
         onUpdate(tasks, isFromCache);
@@ -139,8 +185,11 @@ export function subscribeToLogsFirestore(
  */
 export async function saveTaskFirestore(task: Task): Promise<void> {
   try {
+    const deletedSet = getDeletedTaskIds();
+    if (deletedSet.has(task.id)) return;
     const taskDocRef = doc(db, TASKS_COLLECTION, task.id);
-    await setDoc(taskDocRef, task, { merge: true });
+    const cleanTask = sanitizeForFirestore(task);
+    await setDoc(taskDocRef, cleanTask, { merge: true });
   } catch (error) {
     console.error("Error saving task to Firestore:", error);
     throw error;
@@ -153,10 +202,14 @@ export async function saveTaskFirestore(task: Task): Promise<void> {
 export async function saveTasksBatchFirestore(tasks: Task[]): Promise<void> {
   try {
     if (!tasks || tasks.length === 0) return;
+    const deletedSet = getDeletedTaskIds();
+    const validTasks = tasks.filter((t) => t && t.id && !deletedSet.has(t.id));
+    if (validTasks.length === 0) return;
+
     const batch = writeBatch(db);
-    tasks.forEach((task) => {
+    validTasks.forEach((task) => {
       const docRef = doc(db, TASKS_COLLECTION, task.id);
-      batch.set(docRef, task, { merge: true });
+      batch.set(docRef, sanitizeForFirestore(task), { merge: true });
     });
     await batch.commit();
   } catch (error) {
@@ -174,6 +227,26 @@ export async function deleteTaskFirestore(taskId: string): Promise<void> {
     await deleteDoc(taskDocRef);
   } catch (error) {
     console.error("Error deleting task from Firestore:", error);
+    throw error;
+  }
+}
+
+/**
+ * Batch delete multiple tasks from Firestore
+ */
+export async function deleteTasksBatchFirestore(taskIds: string[]): Promise<void> {
+  try {
+    if (!taskIds || taskIds.length === 0) return;
+    const batch = writeBatch(db);
+    taskIds.forEach((id) => {
+      if (id) {
+        const docRef = doc(db, TASKS_COLLECTION, id);
+        batch.delete(docRef);
+      }
+    });
+    await batch.commit();
+  } catch (error) {
+    console.error("Error batch deleting tasks from Firestore:", error);
     throw error;
   }
 }
@@ -200,7 +273,7 @@ export async function clearAllTasksFirestore(): Promise<void> {
 export async function saveActivityLogFirestore(log: ActivityLog): Promise<void> {
   try {
     const logDocRef = doc(db, LOGS_COLLECTION, log.id);
-    await setDoc(logDocRef, log, { merge: true });
+    await setDoc(logDocRef, sanitizeForFirestore(log), { merge: true });
   } catch (error) {
     console.error("Error saving activity log to Firestore:", error);
   }

@@ -33,6 +33,8 @@ interface OperatorDashboardProps {
   onOpenHourReschedule?: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (taskId: string) => void;
+  onBulkCompleteTasks?: (taskIds: string[], note?: string) => void;
+  onBulkDeleteTasks?: (taskIds: string[]) => void;
   rolledOverCount: number;
   onClearLogs?: () => void;
 }
@@ -48,6 +50,8 @@ export const OperatorDashboard: React.FC<OperatorDashboardProps> = ({
   onOpenHourReschedule,
   onEditTask,
   onDeleteTask,
+  onBulkCompleteTasks,
+  onBulkDeleteTasks,
   rolledOverCount,
   onClearLogs,
 }) => {
@@ -640,6 +644,8 @@ export const OperatorDashboard: React.FC<OperatorDashboardProps> = ({
           onEditTask={onEditTask}
           onDeleteTask={onDeleteTask}
           onOpenNewTask={onOpenNewTask}
+          onBulkCompleteTasks={onBulkCompleteTasks}
+          onBulkDeleteTasks={onBulkDeleteTasks}
         />
       ) : (
         /* View 4: Dedicated Activity Audit Logs View */

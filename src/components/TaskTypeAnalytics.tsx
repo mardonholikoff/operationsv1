@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Task, TaskPriority } from "../types";
 import { TaskTypeStat, TaskGroupStat, TypeAnalyticsResult } from "../services/typeAnalytics";
 import { formatMinutesUz } from "../services/workload";
-import { formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
+import { formatDateUz, formatCreatedAtUz, getTaskOverdueRolloverInfo } from "../services/storage";
 import {
   Tag,
   Clock,
@@ -16,6 +16,7 @@ import {
   ListTodo,
   TrendingUp,
   Filter,
+  CalendarPlus
 } from "lucide-react";
 
 // =========================================================================
@@ -372,6 +373,19 @@ export const TaskTypeDetailedSection: React.FC<TaskTypeDetailedSectionProps> = (
                                   </span>
                                 )}
                               </div>
+                            </div>
+
+                            {/* Yaratilgan vaqti */}
+                            <div className="mt-1.5 pt-1 border-t border-slate-100 flex items-center justify-between text-[9px] text-slate-500 font-medium">
+                              <span className="flex items-center">
+                                <CalendarPlus className="w-2.5 h-2.5 mr-1 text-slate-400 shrink-0" />
+                                Yaratilgan: <strong className="text-slate-700 ml-1 font-semibold">{formatCreatedAtUz(t.createdAt, t.id)}</strong>
+                              </span>
+                              {t.createdBy && (
+                                <span className="text-[9px] text-slate-400">
+                                  {t.createdBy === "admin" ? "admin" : t.createdBy}
+                                </span>
+                              )}
                             </div>
                           </div>
                         );

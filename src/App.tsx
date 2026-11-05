@@ -12,6 +12,11 @@ import {
   addDaysToDate,
   addMonthsToDate,
   rememberTaskAsTemplate,
+  getDeletedTaskIds,
+  markTasksAsDeleted,
+  getCompletedTaskIds,
+  markTasksAsCompleted,
+  unmarkTaskCompleted,
 } from "./services/storage";
 import {
   subscribeToTasksFirestore,
@@ -19,12 +24,14 @@ import {
   saveTaskFirestore,
   saveTasksBatchFirestore,
   deleteTaskFirestore,
+  deleteTasksBatchFirestore,
   saveActivityLogFirestore,
   clearAllLogsFirestore,
 } from "./services/firebase";
 import {
   enqueueSaveTask,
   enqueueDeleteTask,
+  enqueueDeleteTasksBatch,
   enqueueSaveLog,
   enqueueClearLogs,
   flushOfflineQueue,
@@ -109,20 +116,30 @@ export function App() {
     }
   }, []);
 
-  // Merge Firestore cloud tasks with locally pending offline mutations
+  // Merge Firestore cloud tasks with locally pending offline mutations and tombstones
   const mergeWithOfflineQueue = useCallback((cloudTasks: Task[]): Task[] => {
     const queue = getOfflineQueue();
+    const deletedSet = getDeletedTaskIds();
+    const completedSet = getCompletedTaskIds();
     const map = new Map<string, Task>();
 
-    // 1. Add all cloud tasks
+    // 1. Add all non-deleted cloud tasks
     cloudTasks.forEach((t) => {
-      if (t && t.id) map.set(t.id, t);
+      if (t && t.id && !deletedSet.has(t.id)) {
+        if (completedSet.has(t.id) && !t.isCompleted) {
+          map.set(t.id, { ...t, isCompleted: true, status: "completed" });
+        } else {
+          map.set(t.id, t);
+        }
+      }
     });
 
     // 2. Apply queued operations
     queue.forEach((mutation) => {
       if (mutation.type === "save_task" && mutation.task) {
-        map.set(mutation.task.id, mutation.task);
+        if (!deletedSet.has(mutation.task.id)) {
+          map.set(mutation.task.id, mutation.task);
+        }
       } else if (mutation.type === "delete_task" && mutation.taskId) {
         map.delete(mutation.taskId);
       }
@@ -133,25 +150,15 @@ export function App() {
 
   // Initial load and Real-time Firebase Firestore Listeners
   useEffect(() => {
-    // 1. Check auto-rollover for local state on startup
+    // 1. Check auto-rollover for local state on startup (do not push stale localStorage to Firestore before live snapshot arrives)
     const initialLocalTasks = getStoredTasks();
     const initialLocalLogs = getStoredLogs();
 
-    const { updatedTasks, rolledCount, changedTasks } = checkAndPerformAutoRollover(initialLocalTasks);
+    const { updatedTasks, rolledCount } = checkAndPerformAutoRollover(initialLocalTasks);
     setTasks(updatedTasks);
     setLogs(initialLocalLogs);
     setRolledOverCount(rolledCount);
     setPendingCount(getPendingQueueCount());
-
-    if (changedTasks.length > 0) {
-      if (navigator.onLine) {
-        saveTasksBatchFirestore(changedTasks).catch(() => {
-          changedTasks.forEach((t) => enqueueSaveTask(t));
-        });
-      } else {
-        changedTasks.forEach((t) => enqueueSaveTask(t));
-      }
-    }
 
     // 2. If online, flush any pending offline mutations immediately
     if (navigator.onLine) {
@@ -163,7 +170,7 @@ export function App() {
       (firestoreTasks, fromCache) => {
         setIsFromCache(fromCache);
         if (Array.isArray(firestoreTasks)) {
-          // Merge with any local pending un-flushed offline tasks
+          // Merge with any local pending un-flushed offline tasks and tombstones
           const merged = mergeWithOfflineQueue(firestoreTasks);
           // Automatically roll over any uncompleted overdue tasks arriving from Firestore
           const { updatedTasks: rolledMerged, rolledCount: incomingRolled, changedTasks: incomingChanged } =
@@ -172,8 +179,11 @@ export function App() {
           setTasks(rolledMerged);
           saveStoredTasks(rolledMerged);
 
-          if (incomingRolled > 0 && incomingChanged.length > 0) {
-            setRolledOverCount((prev) => prev + incomingRolled);
+          // Only write auto-rolled changes back to Firestore when snapshot is confirmed from live server (!fromCache)
+          if (!fromCache && incomingChanged.length > 0) {
+            if (incomingRolled > 0) {
+              setRolledOverCount((prev) => prev + incomingRolled);
+            }
             if (navigator.onLine) {
               saveTasksBatchFirestore(incomingChanged).catch(() => {
                 incomingChanged.forEach((t) => enqueueSaveTask(t));
@@ -453,6 +463,7 @@ export function App() {
           newIsCompleted = false;
           newStatus = "pending";
           newActualDuration = undefined;
+          unmarkTaskCompleted(task.id);
         }
 
         const updatedTask: Task = {
@@ -491,10 +502,13 @@ export function App() {
   };
 
   const handleConfirmComplete = (taskId: string, note: string, actualDuration?: number) => {
+    markTasksAsCompleted([taskId]);
+
     let completedTaskTitle = "";
     let spawnedTask: Task | null = null;
     let targetUpdatedTask: Task | null = null;
     let taskEstimatedDuration: number | undefined;
+    const today = getTodayString();
 
     const updated = tasks.map((task) => {
       if (task.id === taskId) {
@@ -508,7 +522,7 @@ export function App() {
           task.scheduleType === "weekly" ||
           task.scheduleType === "monthly"
         ) {
-          const baseDate = task.dueDate || getTodayString();
+          const baseDate = task.dueDate && task.dueDate >= today ? task.dueDate : today;
           let nextDueDate = baseDate;
 
           if (task.scheduleType === "daily") {
@@ -527,31 +541,43 @@ export function App() {
             }
           }
 
-          spawnedTask = {
-            id: "task-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
-            title: task.title,
-            priority: task.priority,
-            scheduleType: task.scheduleType,
-            dateMode: task.dateMode,
-            monthlyDay: task.monthlyDay,
-            monthlyStartDay: task.monthlyStartDay,
-            monthlyEndDay: task.monthlyEndDay,
-            startDate: nextDueDate,
-            dueDate: nextDueDate,
-            dueTime: task.dueTime,
-            estimatedDuration: task.estimatedDuration,
-            status: "pending",
-            isCompleted: false,
-            createdAt: new Date().toISOString(),
-            createdBy: task.createdBy || currentUser?.username || "operator1",
-            steps: (task.steps || []).map((s, idx) => ({
-              id: `step-${Date.now()}-${idx}`,
-              text: s.text,
-              completed: false,
-              estimatedMinutes: s.estimatedMinutes,
-            })),
-            history: [],
-          };
+          // Check if an uncompleted copy of this recurring task already exists for nextDueDate or later
+          const alreadyExists = tasks.some(
+            (t) =>
+              t.id !== task.id &&
+              !t.isCompleted &&
+              t.title.trim().toLowerCase() === task.title.trim().toLowerCase() &&
+              t.scheduleType === task.scheduleType &&
+              t.dueDate >= nextDueDate
+          );
+
+          if (!alreadyExists) {
+            spawnedTask = {
+              id: "task-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+              title: task.title,
+              priority: task.priority,
+              scheduleType: task.scheduleType,
+              dateMode: task.dateMode,
+              monthlyDay: task.monthlyDay,
+              monthlyStartDay: task.monthlyStartDay,
+              monthlyEndDay: task.monthlyEndDay,
+              startDate: nextDueDate,
+              dueDate: nextDueDate,
+              dueTime: task.dueTime,
+              estimatedDuration: task.estimatedDuration,
+              status: "pending",
+              isCompleted: false,
+              createdAt: new Date().toISOString(),
+              createdBy: task.createdBy || currentUser?.username || "operator1",
+              steps: (task.steps || []).map((s, idx) => ({
+                id: `step-${Date.now()}-${idx}`,
+                text: s.text,
+                completed: false,
+                estimatedMinutes: s.estimatedMinutes,
+              })),
+              history: [],
+            };
+          }
         }
 
         const compTask: Task = {
@@ -562,7 +588,9 @@ export function App() {
           completionNote: note,
           completedBy: currentUser?.username || "operator",
           status: "completed" as const,
-          actualDuration: typeof actualDuration === "number" && actualDuration >= 0 ? actualDuration : undefined,
+          ...(typeof actualDuration === "number" && actualDuration >= 0
+            ? { actualDuration }
+            : {}),
         };
         targetUpdatedTask = compTask;
         return compTask;
@@ -820,6 +848,9 @@ export function App() {
     const taskToRemove = tasks.find((t) => t.id === taskId);
     if (!taskToRemove) return;
 
+    // Permanently tombstone the deleted task ID so it never resurfaces from cache or rollover
+    markTasksAsDeleted([taskId]);
+
     const updated = tasks.filter((t) => t.id !== taskId);
     setTasks(updated);
     saveStoredTasks(updated);
@@ -854,6 +885,179 @@ export function App() {
     setPendingCount(getPendingQueueCount());
     setIsDeleteModalOpen(false);
     setTaskToDelete(null);
+  };
+
+  const handleBulkCompleteTasks = (taskIds: string[], note?: string) => {
+    if (!taskIds || taskIds.length === 0) return;
+    const idSet = new Set(taskIds);
+    markTasksAsCompleted(taskIds);
+
+    const nowIso = new Date().toISOString();
+    const today = getTodayString();
+    const operatorName = currentUser?.username || "operator";
+    const changedTasks: Task[] = [];
+    const spawnedTasks: Task[] = [];
+
+    const updated = tasks.map((task) => {
+      if (!idSet.has(task.id) || task.isCompleted) {
+        return task;
+      }
+
+      if (
+        task.scheduleType === "daily" ||
+        task.scheduleType === "every_3_days" ||
+        task.scheduleType === "weekly" ||
+        task.scheduleType === "monthly"
+      ) {
+        const baseDate = task.dueDate && task.dueDate >= today ? task.dueDate : today;
+        let nextDueDate = baseDate;
+
+        if (task.scheduleType === "daily") {
+          nextDueDate = addDaysToDate(baseDate, 1);
+        } else if (task.scheduleType === "every_3_days") {
+          nextDueDate = addDaysToDate(baseDate, 3);
+        } else if (task.scheduleType === "weekly") {
+          nextDueDate = addDaysToDate(baseDate, 7);
+        } else if (task.scheduleType === "monthly") {
+          if (task.dateMode === "range" && task.monthlyEndDay) {
+            nextDueDate = getNextMonthlyDate(task.monthlyEndDay);
+          } else if (task.monthlyDay) {
+            nextDueDate = getNextMonthlyDate(task.monthlyDay);
+          } else {
+            nextDueDate = addMonthsToDate(baseDate, 1);
+          }
+        }
+
+        const alreadyExists = tasks.some(
+          (t) =>
+            !idSet.has(t.id) &&
+            !t.isCompleted &&
+            t.title.trim().toLowerCase() === task.title.trim().toLowerCase() &&
+            t.scheduleType === task.scheduleType &&
+            t.dueDate >= nextDueDate
+        );
+
+        if (!alreadyExists) {
+          const sp: Task = {
+            id: `task-${Date.now()}-${spawnedTasks.length}-${Math.random().toString(36).substring(2, 7)}`,
+            title: task.title,
+            priority: task.priority,
+            scheduleType: task.scheduleType,
+            dateMode: task.dateMode,
+            monthlyDay: task.monthlyDay,
+            monthlyStartDay: task.monthlyStartDay,
+            monthlyEndDay: task.monthlyEndDay,
+            startDate: nextDueDate,
+            dueDate: nextDueDate,
+            dueTime: task.dueTime,
+            estimatedDuration: task.estimatedDuration,
+            status: "pending",
+            isCompleted: false,
+            createdAt: nowIso,
+            createdBy: task.createdBy || operatorName,
+            steps: (task.steps || []).map((s, idx) => ({
+              id: `step-${Date.now()}-${idx}`,
+              text: s.text,
+              completed: false,
+              estimatedMinutes: s.estimatedMinutes,
+            })),
+            history: [],
+          };
+          spawnedTasks.push(sp);
+          changedTasks.push(sp);
+        }
+      }
+
+      const compTask: Task = {
+        ...task,
+        steps: (task.steps || []).map((s) => ({ ...s, completed: true })),
+        isCompleted: true,
+        completedAt: nowIso,
+        completionNote: note || "Ommaviy ravishda bajarildi deb belgilandi",
+        completedBy: operatorName,
+        status: "completed",
+      };
+      changedTasks.push(compTask);
+      return compTask;
+    });
+
+    const finalTasks = [...spawnedTasks, ...updated];
+    setTasks(finalTasks);
+    saveStoredTasks(finalTasks);
+
+    if (changedTasks.length > 0) {
+      if (navigator.onLine) {
+        saveTasksBatchFirestore(changedTasks).catch(() => {
+          changedTasks.forEach((t) => enqueueSaveTask(t));
+        });
+      } else {
+        changedTasks.forEach((t) => enqueueSaveTask(t));
+      }
+    }
+
+    const logItem: ActivityLog = {
+      id: "log-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+      timestamp: nowIso,
+      operator: operatorName,
+      action: "completed",
+      taskTitle: `${changedTasks.length - spawnedTasks.length} ta vazifa`,
+      details: `Jadval orqali birdaniga ${changedTasks.length - spawnedTasks.length} ta vazifa "Bajarildi" deb belgilandi.${note ? ` Izoh: ${note}` : ""}`,
+    };
+
+    addActivityLog(logItem);
+    if (navigator.onLine) {
+      saveActivityLogFirestore(logItem).catch(() => enqueueSaveLog(logItem));
+    } else {
+      enqueueSaveLog(logItem);
+    }
+
+    setLogs(getStoredLogs());
+    setPendingCount(getPendingQueueCount());
+  };
+
+  const handleBulkDeleteTasks = (taskIds: string[]) => {
+    if (!taskIds || taskIds.length === 0) return;
+    const idSet = new Set(taskIds);
+
+    // Permanently tombstone all deleted task IDs
+    markTasksAsDeleted(taskIds);
+
+    const removedTitles = tasks
+      .filter((t) => idSet.has(t.id))
+      .map((t) => t.title)
+      .slice(0, 3)
+      .join(", ");
+
+    const updated = tasks.filter((t) => !idSet.has(t.id));
+    setTasks(updated);
+    saveStoredTasks(updated);
+
+    if (navigator.onLine) {
+      deleteTasksBatchFirestore(taskIds).catch(() => {
+        enqueueDeleteTasksBatch(taskIds);
+      });
+    } else {
+      enqueueDeleteTasksBatch(taskIds);
+    }
+
+    const logItem: ActivityLog = {
+      id: "log-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+      timestamp: new Date().toISOString(),
+      operator: currentUser?.username || "operator",
+      action: "deleted",
+      taskTitle: `${taskIds.length} ta vazifa (${removedTitles}${taskIds.length > 3 ? "..." : ""})`,
+      details: `Jadval orqali tanlangan ${taskIds.length} ta vazifa tizimdan butunlay o'chirildi.`,
+    };
+
+    addActivityLog(logItem);
+    if (navigator.onLine) {
+      saveActivityLogFirestore(logItem).catch(() => enqueueSaveLog(logItem));
+    } else {
+      enqueueSaveLog(logItem);
+    }
+
+    setLogs(getStoredLogs());
+    setPendingCount(getPendingQueueCount());
   };
 
   const handleEditTask = (task: Task) => {
@@ -951,6 +1155,8 @@ export function App() {
                 }}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
+                onBulkCompleteTasks={handleBulkCompleteTasks}
+                onBulkDeleteTasks={handleBulkDeleteTasks}
                 rolledOverCount={rolledOverCount}
                 onClearLogs={handleClearLogs}
               />

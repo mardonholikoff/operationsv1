@@ -7,6 +7,7 @@ import {
   addDaysToDate,
   addMonthsToDate,
   formatDateUz,
+  formatCreatedAtUz,
   getAllTaskTemplates,
   TaskTemplateItem,
   getTaskOverdueRolloverInfo,
@@ -31,7 +32,8 @@ import {
   CheckCircle2,
   Search,
   Copy,
-  ChevronDown
+  ChevronDown,
+  CalendarPlus
 } from "lucide-react";
 
 interface TaskFormModalProps {
@@ -98,6 +100,13 @@ const SCHEDULE_TYPES_LIST: {
   icon: any;
 }[] = [
   {
+    id: "once",
+    title: "Bir martalik",
+    sub: "Faqat tanlangan sana yoki muddat uchun (bajarilgach qayta chiqmaydi)",
+    badge: "1 martalik",
+    icon: Clock,
+  },
+  {
     id: "daily",
     title: "Har kunlik",
     sub: "Boshlanish sanasidan har kuni eslatadi",
@@ -125,13 +134,6 @@ const SCHEDULE_TYPES_LIST: {
     badge: "Har oy",
     icon: Repeat,
   },
-  {
-    id: "once",
-    title: "Bir martalik",
-    sub: "Faqat bir martalik sana yoki muddat oralig'i",
-    badge: "1 martalik",
-    icon: Clock,
-  },
 ];
 
 export const TaskFormModal: React.FC<TaskFormModalProps> = ({
@@ -147,8 +149,8 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("Soliq(Muhim)");
   
-  // Schedule type: daily | every_3_days | weekly | monthly | once
-  const [scheduleType, setScheduleType] = useState<ScheduleType>("daily");
+  // Schedule type: once (default) | daily | every_3_days | weekly | monthly
+  const [scheduleType, setScheduleType] = useState<ScheduleType>("once");
   
   // Tur: 'single' (1-bir kunga belgilash) vs 'range' (2-ma'lum muddat oralig'iga belgilash)
   const [dateMode, setDateMode] = useState<DateMode>("single");
@@ -219,7 +221,7 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
       // Reset form for fresh task
       setTitle("");
       setPriority("Soliq(Muhim)");
-      setScheduleType("daily");
+      setScheduleType("once");
       setDateMode("single");
       setMonthlyDay(15);
       setMonthlyStartDay(10);
@@ -1325,23 +1327,39 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
           </div>
 
           {/* Modal Footer Actions */}
-          <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-100">
-            <button
-              id="btn-cancel-task-form"
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-semibold text-xs sm:text-sm hover:bg-slate-100 transition-colors cursor-pointer"
-            >
-              Bekor qilish
-            </button>
-            <button
-              id="btn-save-task-form"
-              type="submit"
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs sm:text-sm shadow-md shadow-blue-500/20 hover:shadow-lg transition-all flex items-center space-x-1.5 cursor-pointer"
-            >
-              <FileCheck2 className="w-4 h-4" />
-              <span>{initialTask ? "O'zgarishlarni Saqlash" : "Vazifani Qo'shish"}</span>
-            </button>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
+            {initialTask ? (
+              <div className="flex items-center text-xs text-slate-500 font-medium">
+                <CalendarPlus className="w-3.5 h-3.5 mr-1 text-slate-400 shrink-0" />
+                <span>
+                  Yaratilgan: <strong className="text-slate-700">{formatCreatedAtUz(initialTask.createdAt, initialTask.id)}</strong>
+                  {initialTask.createdBy && (
+                    <span className="ml-1 text-slate-400">
+                      ({initialTask.createdBy === "admin" ? "admin" : initialTask.createdBy})
+                    </span>
+                  )}
+                </span>
+              </div>
+            ) : <div />}
+
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                id="btn-cancel-task-form"
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-semibold text-xs sm:text-sm hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Bekor qilish
+              </button>
+              <button
+                id="btn-save-task-form"
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs sm:text-sm shadow-md shadow-blue-500/20 hover:shadow-lg transition-all flex items-center space-x-1.5 cursor-pointer"
+              >
+                <FileCheck2 className="w-4 h-4" />
+                <span>{initialTask ? "O'zgarishlarni Saqlash" : "Vazifani Qo'shish"}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>
