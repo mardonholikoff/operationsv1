@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Task } from "../types";
 import { CalendarClock, X, ArrowRight, AlertCircle, FileEdit, Clock, Calendar, AlertTriangle } from "lucide-react";
-import { getTodayString, formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
+import { getTodayString, addDaysToDate, formatDateUz, getTaskOverdueRolloverInfo } from "../services/storage";
 
 interface RescheduleTaskModalProps {
   isOpen: boolean;
@@ -37,10 +37,8 @@ export const RescheduleTaskModal: React.FC<RescheduleTaskModalProps> = ({
 
   useEffect(() => {
     if (task) {
-      // Default to tomorrow or today + 1
-      const d = new Date();
-      d.setDate(d.getDate() + 1);
-      setNewDate(d.toISOString().split("T")[0]);
+      // Default to tomorrow (local date)
+      setNewDate(addDaysToDate(getTodayString(), 1));
       setNewTime(task.dueTime || "09:00");
       setReason("");
       setScope("temporary");
@@ -53,9 +51,7 @@ export const RescheduleTaskModal: React.FC<RescheduleTaskModalProps> = ({
   const isRecurring = task.scheduleType !== "once";
 
   const setQuickDate = (offsetDays: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + offsetDays);
-    setNewDate(d.toISOString().split("T")[0]);
+    setNewDate(addDaysToDate(getTodayString(), offsetDays));
   };
 
   // Count existing tasks on that new date at that time

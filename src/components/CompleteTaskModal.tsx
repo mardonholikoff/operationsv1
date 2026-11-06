@@ -13,16 +13,28 @@ import {
   RotateCcw,
   Zap,
   AlertTriangle,
+  Repeat,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { getTaskEstimatedMinutes, formatMinutesUz } from "../services/workload";
-import { getTaskOverdueRolloverInfo } from "../services/storage";
+import {
+  getTaskOverdueRolloverInfo,
+  isTaskTrulyRecurring,
+  getNextRecurringDate,
+  formatDateUz,
+  formatTaskScheduleDisplay,
+} from "../services/storage";
 
 interface CompleteTaskModalProps {
   isOpen: boolean;
   task: Task | null;
   onClose: () => void;
-  onConfirmComplete: (taskId: string, note: string, actualDuration?: number) => void;
+  onConfirmComplete: (
+    taskId: string,
+    note: string,
+    actualDuration?: number,
+    spawnNext?: boolean
+  ) => void;
 }
 
 export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
@@ -33,11 +45,13 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
 }) => {
   const [note, setNote] = useState("");
   const [actualMinutesInput, setActualMinutesInput] = useState<string>("");
+  const [spawnNext, setSpawnNext] = useState<boolean>(false);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && task) {
       setNote("");
       setActualMinutesInput("");
+      setSpawnNext(isTaskTrulyRecurring(task));
     }
   }, [isOpen, task]);
 
@@ -45,6 +59,9 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
 
   const plannedMinutes = getTaskEstimatedMinutes(task);
   const rolloverInfo = getTaskOverdueRolloverInfo(task);
+  const isRecurring = isTaskTrulyRecurring(task);
+  const nextRecurringDate = getNextRecurringDate(task);
+  const scheduleInfo = formatTaskScheduleDisplay(task);
 
   // Foydalanuvchi kiritgan raqamni hisoblash
   const parsedActual = actualMinutesInput.trim() !== "" ? parseInt(actualMinutesInput, 10) : undefined;
@@ -71,7 +88,7 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
       // ignore
     }
 
-    onConfirmComplete(task.id, note.trim(), actualMinutes);
+    onConfirmComplete(task.id, note.trim(), actualMinutes, isRecurring ? spawnNext : false);
     setNote("");
     setActualMinutesInput("");
     onClose();
@@ -156,13 +173,49 @@ export const CompleteTaskModal: React.FC<CompleteTaskModalProps> = ({
             </div>
           </div>
 
-          {/* Monthly Reminder Info if applicable */}
-          {task.scheduleType === "monthly" && (
-            <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl text-xs text-blue-800">
-              <Sparkles className="w-4 h-4 text-blue-600 inline mr-1" />
-              <strong>Oylik takrorlanuvchi vazifa:</strong> Ushbu oy uchun
-              bajarildi deb belgilanadi va keyingi oyning {task.monthlyDay}-kuni
-              uchun avtomatik navbatdagi eslatma faollashtiriladi.
+          {/* Takrorlanuvchi yoki Bir martalik vazifa xabarnomasi */}
+          {isRecurring && nextRecurringDate ? (
+            <div className="p-3.5 bg-blue-50/90 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start space-x-2">
+                  <Repeat className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold text-blue-950 block">
+                      Davriy takrorlanuvchi vazifa ({scheduleInfo.label}):
+                    </span>
+                    <span className="text-[11px] text-blue-800 leading-snug">
+                      {spawnNext ? (
+                        <>
+                          Bugungi vazifa bajarildi deb yopiladi va navbatdagi muddat —{" "}
+                          <strong>{formatDateUz(nextRecurringDate)}</strong> kuni uchun avtomatik yangi vazifa ochiladi.
+                        </>
+                      ) : (
+                        <>
+                          Keyingi muddatga takrorlash o'chirildi: vazifa <strong>bir martalik</strong> sifatida to'liq yopiladi va keyingi kunlarda qaytib chiqmaydi.
+                        </>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <label className="flex items-center space-x-2 pt-1.5 border-t border-blue-200/70 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={spawnNext}
+                  onChange={(e) => setSpawnNext(e.target.checked)}
+                  className="w-4 h-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+                <span className="text-[11px] font-bold text-blue-950">
+                  Keyingi muddatga ({formatDateUz(nextRecurringDate)}) davriy chiqarishni davom ettirish
+                </span>
+              </label>
+            </div>
+          ) : (
+            <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-center space-x-2">
+              <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                <strong>Bir martalik vazifa:</strong> Bajarildi deb saqlangach to'liq yopiladi va ertangi yoki keyingi kunlarda qaytib chiqmaydi.
+              </span>
             </div>
           )}
 

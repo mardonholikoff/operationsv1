@@ -74,20 +74,20 @@ const PRIORITY_OPTIONS: { value: TaskPriority; label: string; desc: string; colo
   },
   {
     value: "Takrorlanmas ish(Muhim)",
-    label: "Boshqa vazifa (Muhim)",
-    desc: "Kechiktirib bo'lmaydigan alohida topshiriqlar",
+    label: "Takrorlanmas ish (Muhim)",
+    desc: "Bir martalik kechiktirib bo'lmaydigan alohida topshiriqlar (bajarilgach qayta chiqmaydi)",
     color: "bg-purple-50 border-purple-300 text-purple-800"
   },
   {
     value: "Takrorlanmas ish(O'rtacha)",
-    label: "Boshqa vazifa (O'rtacha)",
-    desc: "Oddiy kundalik topshiriqlar va buyurtmalar",
+    label: "Takrorlanmas ish (O'rtacha)",
+    desc: "Bir martalik kundalik topshiriqlar va buyurtmalar (bajarilgach qayta chiqmaydi)",
     color: "bg-indigo-50 border-indigo-300 text-indigo-800"
   },
   {
     value: "Takrorlanmas ish(Past)",
-    label: "Boshqa vazifa (Past)",
-    desc: "Muddati erkin bo'lgan kichik ishlar",
+    label: "Takrorlanmas ish (Past)",
+    desc: "Bir martalik muddati erkin bo'lgan kichik ishlar (bajarilgach qayta chiqmaydi)",
     color: "bg-emerald-50 border-emerald-300 text-emerald-800"
   }
 ];
@@ -243,7 +243,11 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
   const applyTemplate = (templateTask: TaskTemplateItem | Task) => {
     setTitle(templateTask.title);
     setPriority(templateTask.priority);
-    setScheduleType(templateTask.scheduleType || "once");
+    if (templateTask.priority && templateTask.priority.startsWith("Takrorlanmas ish")) {
+      setScheduleType("once");
+    } else {
+      setScheduleType(templateTask.scheduleType || "once");
+    }
     setDateMode(templateTask.dateMode || "single");
     setMonthlyDay(templateTask.monthlyDay || 15);
     setMonthlyStartDay(templateTask.monthlyStartDay || 10);
@@ -283,7 +287,7 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
   const handleResetToBlank = () => {
     setTitle("");
     setPriority("Soliq(Muhim)");
-    setScheduleType("daily");
+    setScheduleType("once");
     setDateMode("single");
     setMonthlyDay(15);
     setMonthlyStartDay(10);
@@ -370,9 +374,7 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
   const isOverDuration = estimatedDuration !== undefined && estimatedDuration > 0 && sumStepMinutes > estimatedDuration;
 
   const setQuickStartDate = (daysOffset: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + daysOffset);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = addDaysToDate(getTodayString(), daysOffset);
     setStartDate(dateStr);
     if (scheduleType !== "once" || dateMode === "single") {
       setDueDate(dateStr);
@@ -885,7 +887,13 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
               <select
                 id="task-priority-select"
                 value={priority}
-                onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                onChange={(e) => {
+                  const nextPriority = e.target.value as TaskPriority;
+                  setPriority(nextPriority);
+                  if (nextPriority.startsWith("Takrorlanmas ish")) {
+                    setScheduleType("once");
+                  }
+                }}
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all cursor-pointer"
               >
                 {PRIORITY_OPTIONS.map((opt) => (

@@ -12,10 +12,17 @@ import {
   query,
   writeBatch,
   getDocs,
+  arrayUnion,
+  arrayRemove,
   FirestoreError,
 } from "firebase/firestore";
 import { Task, ActivityLog } from "../types";
-import { getDeletedTaskIds } from "./storage";
+import {
+  getDeletedTaskIds,
+  markTasksAsDeleted,
+  getCompletedTaskIds,
+  markTasksAsCompleted,
+} from "./storage";
 import firebaseConfigData from "../../firebase-applet-config.json";
 
 // Initialize Firebase App
@@ -66,6 +73,8 @@ export { db, app, auth };
 
 const TASKS_COLLECTION = "tasks";
 const LOGS_COLLECTION = "activity_logs";
+const META_COLLECTION = "system_meta";
+const TOMBSTONES_DOC_ID = "tombstones";
 
 /**
  * Recursively strips `undefined` properties from any object/array before writing to Firestore
@@ -91,50 +100,202 @@ export function sanitizeForFirestore<T>(data: T): T {
 }
 
 /**
- * Real-time listener for tasks collection with offline cache support
+ * Syncs deleted task IDs to cloud Firestore tombstones so no other device/tab can ever resurrect them
+ */
+export async function syncDeletedIdsToCloud(taskIds: string[]): Promise<void> {
+  if (!taskIds || taskIds.length === 0) return;
+  try {
+    const cleanIds = taskIds.filter(Boolean);
+    if (cleanIds.length === 0) return;
+    const ref = doc(db, META_COLLECTION, TOMBSTONES_DOC_ID);
+    await setDoc(
+      ref,
+      {
+        deletedIds: arrayUnion(...cleanIds),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn("Could not sync deleted IDs to cloud tombstones:", err);
+  }
+}
+
+/**
+ * Syncs completed task IDs to cloud Firestore tombstones so no other device/tab can revert them to uncompleted
+ */
+export async function syncCompletedIdsToCloud(
+  completedIds: string[],
+  uncompletedIds: string[] = []
+): Promise<void> {
+  try {
+    const ref = doc(db, META_COLLECTION, TOMBSTONES_DOC_ID);
+    const payload: Record<string, unknown> = {
+      updatedAt: new Date().toISOString(),
+    };
+    const cleanComp = (completedIds || []).filter(Boolean);
+    const cleanUncomp = (uncompletedIds || []).filter(Boolean);
+
+    if (cleanComp.length > 0) {
+      payload.completedIds = arrayUnion(...cleanComp);
+    } else if (cleanUncomp.length > 0) {
+      payload.completedIds = arrayRemove(...cleanUncomp);
+    } else {
+      return;
+    }
+
+    await setDoc(ref, payload, { merge: true });
+  } catch (err) {
+    console.warn("Could not sync completed IDs to cloud tombstones:", err);
+  }
+}
+
+/**
+ * Real-time listener for tasks collection with offline cache support and cloud tombstone synchronization
  */
 export function subscribeToTasksFirestore(
   onUpdate: (tasks: Task[], isFromCache: boolean) => void,
   onError?: (error: FirestoreError) => void
 ): () => void {
+  let latestRawDocs: { id: string; data: Task }[] = [];
+  let latestFromCache = true;
+  let hasReceivedTasksSnap = false;
+
+  const processAndEmit = () => {
+    if (!hasReceivedTasksSnap) return;
+    const deletedSet = getDeletedTaskIds();
+    const completedSet = getCompletedTaskIds();
+    const tasks: Task[] = [];
+    const staleDeletedIds: string[] = [];
+    const staleUncompletedTasks: Task[] = [];
+
+    for (const item of latestRawDocs) {
+      const { id, data } = item;
+      if (deletedSet.has(id) || (data as Task & { isDeleted?: boolean }).isDeleted) {
+        if (!latestFromCache) {
+          staleDeletedIds.push(id);
+        }
+        continue;
+      }
+
+      const allStepsDone =
+        Array.isArray(data.steps) &&
+        data.steps.length > 0 &&
+        data.steps.every((s) => Boolean(s.completed));
+
+      const isActuallyCompleted =
+        data.isCompleted ||
+        data.status === "completed" ||
+        Boolean(data.completedAt) ||
+        completedSet.has(id) ||
+        allStepsDone;
+
+      if (isActuallyCompleted && (!data.isCompleted || data.status !== "completed")) {
+        const fixedTask: Task = {
+          ...data,
+          id,
+          isCompleted: true,
+          status: "completed",
+          completedAt: data.completedAt || new Date().toISOString(),
+        };
+        tasks.push(fixedTask);
+        if (!latestFromCache) {
+          staleUncompletedTasks.push(fixedTask);
+        }
+      } else {
+        if (isActuallyCompleted && !completedSet.has(id)) {
+          markTasksAsCompleted([id]);
+        }
+        tasks.push({
+          ...data,
+          id,
+        });
+      }
+    }
+
+    // If any deleted task still exists in live Firestore, purge it immediately
+    if (staleDeletedIds.length > 0) {
+      deleteTasksBatchFirestore(staleDeletedIds).catch(() => {});
+    }
+
+    // If any completed task was reverted in Firestore, repair it immediately
+    if (staleUncompletedTasks.length > 0) {
+      saveTasksBatchFirestore(staleUncompletedTasks).catch(() => {});
+    }
+
+    onUpdate(tasks, latestFromCache);
+  };
+
   try {
+    // 1. Subscribe to cloud tombstones document so deletions/completions from any device are honored
+    const tombstonesRef = doc(db, META_COLLECTION, TOMBSTONES_DOC_ID);
+    const unsubTombstones = onSnapshot(
+      tombstonesRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data() as {
+            deletedIds?: string[];
+            completedIds?: string[];
+          };
+          let changed = false;
+          if (Array.isArray(data.deletedIds) && data.deletedIds.length > 0) {
+            const currentDel = getDeletedTaskIds();
+            const newDels = data.deletedIds.filter((id) => id && !currentDel.has(id));
+            if (newDels.length > 0) {
+              markTasksAsDeleted(newDels);
+              changed = true;
+            }
+          }
+          if (Array.isArray(data.completedIds) && data.completedIds.length > 0) {
+            const currentComp = getCompletedTaskIds();
+            const currentDel = getDeletedTaskIds();
+            const newComps = data.completedIds.filter(
+              (id) => id && !currentComp.has(id) && !currentDel.has(id)
+            );
+            if (newComps.length > 0) {
+              markTasksAsCompleted(newComps);
+              changed = true;
+            }
+          }
+          if (changed && hasReceivedTasksSnap) {
+            processAndEmit();
+          }
+        }
+      },
+      () => {
+        // Ignore tombstone listener errors silently
+      }
+    );
+
+    // 2. Subscribe to tasks collection
     const tasksQuery = query(collection(db, TASKS_COLLECTION));
-    return onSnapshot(
+    const unsubTasks = onSnapshot(
       tasksQuery,
       { includeMetadataChanges: true },
       (snapshot) => {
-        const deletedSet = getDeletedTaskIds();
-        const tasks: Task[] = [];
-        const staleDeletedIds: string[] = [];
-
+        hasReceivedTasksSnap = true;
+        latestFromCache = snapshot.metadata.fromCache;
+        const docs: { id: string; data: Task }[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as Task;
           const id = docSnap.id || data.id;
-          if (deletedSet.has(id)) {
-            if (!snapshot.metadata.fromCache) {
-              staleDeletedIds.push(id);
-            }
-            return;
+          if (id) {
+            docs.push({ id, data });
           }
-          tasks.push({
-            ...data,
-            id,
-          });
         });
-
-        // If any locally deleted task still exists in live Firestore, purge it
-        if (staleDeletedIds.length > 0) {
-          deleteTasksBatchFirestore(staleDeletedIds).catch(() => {});
-        }
-
-        const isFromCache = snapshot.metadata.fromCache;
-        onUpdate(tasks, isFromCache);
+        latestRawDocs = docs;
+        processAndEmit();
       },
       (error) => {
         console.error("Firestore tasks snapshot error:", error);
         if (onError) onError(error);
       }
     );
+
+    return () => {
+      unsubTombstones();
+      unsubTasks();
+    };
   } catch (err) {
     console.error("Error setting up tasks snapshot:", err);
     return () => {};
@@ -187,8 +348,30 @@ export async function saveTaskFirestore(task: Task): Promise<void> {
   try {
     const deletedSet = getDeletedTaskIds();
     if (deletedSet.has(task.id)) return;
-    const taskDocRef = doc(db, TASKS_COLLECTION, task.id);
-    const cleanTask = sanitizeForFirestore(task);
+
+    const completedSet = getCompletedTaskIds();
+    let finalTask = task;
+
+    if (task.isCompleted || task.status === "completed" || Boolean(task.completedAt)) {
+      markTasksAsCompleted([task.id]);
+      syncCompletedIdsToCloud([task.id]).catch(() => {});
+      finalTask = {
+        ...task,
+        isCompleted: true,
+        status: "completed",
+        completedAt: task.completedAt || new Date().toISOString(),
+      };
+    } else if (completedSet.has(task.id)) {
+      finalTask = {
+        ...task,
+        isCompleted: true,
+        status: "completed",
+        completedAt: task.completedAt || new Date().toISOString(),
+      };
+    }
+
+    const taskDocRef = doc(db, TASKS_COLLECTION, finalTask.id);
+    const cleanTask = sanitizeForFirestore(finalTask);
     await setDoc(taskDocRef, cleanTask, { merge: true });
   } catch (error) {
     console.error("Error saving task to Firestore:", error);
@@ -203,15 +386,41 @@ export async function saveTasksBatchFirestore(tasks: Task[]): Promise<void> {
   try {
     if (!tasks || tasks.length === 0) return;
     const deletedSet = getDeletedTaskIds();
+    const completedSet = getCompletedTaskIds();
     const validTasks = tasks.filter((t) => t && t.id && !deletedSet.has(t.id));
     if (validTasks.length === 0) return;
 
+    const newlyCompletedIds: string[] = [];
     const batch = writeBatch(db);
+
     validTasks.forEach((task) => {
-      const docRef = doc(db, TASKS_COLLECTION, task.id);
-      batch.set(docRef, sanitizeForFirestore(task), { merge: true });
+      let finalTask = task;
+      if (task.isCompleted || task.status === "completed" || Boolean(task.completedAt)) {
+        newlyCompletedIds.push(task.id);
+        finalTask = {
+          ...task,
+          isCompleted: true,
+          status: "completed",
+          completedAt: task.completedAt || new Date().toISOString(),
+        };
+      } else if (completedSet.has(task.id)) {
+        finalTask = {
+          ...task,
+          isCompleted: true,
+          status: "completed",
+          completedAt: task.completedAt || new Date().toISOString(),
+        };
+      }
+      const docRef = doc(db, TASKS_COLLECTION, finalTask.id);
+      batch.set(docRef, sanitizeForFirestore(finalTask), { merge: true });
     });
+
     await batch.commit();
+
+    if (newlyCompletedIds.length > 0) {
+      markTasksAsCompleted(newlyCompletedIds);
+      syncCompletedIdsToCloud(newlyCompletedIds).catch(() => {});
+    }
   } catch (error) {
     console.error("Error batch saving tasks to Firestore:", error);
     throw error;
@@ -219,10 +428,13 @@ export async function saveTasksBatchFirestore(tasks: Task[]): Promise<void> {
 }
 
 /**
- * Delete task from Firestore
+ * Delete task from Firestore and permanently record in cloud tombstones
  */
 export async function deleteTaskFirestore(taskId: string): Promise<void> {
   try {
+    if (!taskId) return;
+    markTasksAsDeleted([taskId]);
+    syncDeletedIdsToCloud([taskId]).catch(() => {});
     const taskDocRef = doc(db, TASKS_COLLECTION, taskId);
     await deleteDoc(taskDocRef);
   } catch (error) {
@@ -232,17 +444,21 @@ export async function deleteTaskFirestore(taskId: string): Promise<void> {
 }
 
 /**
- * Batch delete multiple tasks from Firestore
+ * Batch delete multiple tasks from Firestore and permanently record in cloud tombstones
  */
 export async function deleteTasksBatchFirestore(taskIds: string[]): Promise<void> {
   try {
     if (!taskIds || taskIds.length === 0) return;
+    const cleanIds = taskIds.filter(Boolean);
+    if (cleanIds.length === 0) return;
+
+    markTasksAsDeleted(cleanIds);
+    syncDeletedIdsToCloud(cleanIds).catch(() => {});
+
     const batch = writeBatch(db);
-    taskIds.forEach((id) => {
-      if (id) {
-        const docRef = doc(db, TASKS_COLLECTION, id);
-        batch.delete(docRef);
-      }
+    cleanIds.forEach((id) => {
+      const docRef = doc(db, TASKS_COLLECTION, id);
+      batch.delete(docRef);
     });
     await batch.commit();
   } catch (error) {

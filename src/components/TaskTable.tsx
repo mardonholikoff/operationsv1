@@ -4,6 +4,7 @@ import {
   formatDateUz,
   formatCreatedAtUz,
   getTodayString,
+  addDaysToDate,
   getCreatorLabel,
   formatTaskScheduleDisplay,
   getTaskOverdueRolloverInfo,
@@ -130,15 +131,14 @@ export const TaskTable: React.FC<TaskTableProps> = ({
         return false;
       }
       if (dateFilter === "tomorrow") {
-        const d = new Date();
-        d.setDate(d.getDate() + 1);
-        const tomorrowStr = d.toISOString().split("T")[0];
+        const tomorrowStr = addDaysToDate(todayStr, 1);
         if (task.dueDate !== tomorrowStr) return false;
       }
       if (dateFilter === "this_week") {
         const now = new Date();
-        const start = new Date(now.setDate(now.getDate() - now.getDay() + 1)).toISOString().split("T")[0];
-        const end = new Date(now.setDate(now.getDate() - now.getDay() + 7)).toISOString().split("T")[0];
+        const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); // 1 (Mon) .. 7 (Sun)
+        const start = addDaysToDate(todayStr, 1 - dayOfWeek);
+        const end = addDaysToDate(todayStr, 7 - dayOfWeek);
         if (task.dueDate < start || task.dueDate > end) return false;
       }
       if (dateFilter === "this_month") {

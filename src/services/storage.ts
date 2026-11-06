@@ -382,12 +382,82 @@ export function getNextOccurrenceDate(
   return start;
 }
 
+/**
+ * Determines whether a task is genuinely recurring (daily, every_3_days, weekly, monthly)
+ * vs a one-time task ("once" or any task in the "Takrorlanmas ish" category).
+ */
+export function isTaskTrulyRecurring(task: Pick<Task, "scheduleType" | "priority"> | null | undefined): boolean {
+  if (!task || !task.scheduleType || task.scheduleType === "once") {
+    return false;
+  }
+  // "Takrorlanmas ish(...)" toifasidagi vazifalar bir martalik hisoblanadi va bajarilgach qayta chiqmasligi shart
+  if (task.priority && task.priority.startsWith("Takrorlanmas ish")) {
+    return false;
+  }
+  return (
+    task.scheduleType === "daily" ||
+    task.scheduleType === "every_3_days" ||
+    task.scheduleType === "weekly" ||
+    task.scheduleType === "monthly"
+  );
+}
+
+/**
+ * Computes the next scheduled due date when a recurring task is completed.
+ * Returns null if the task is a one-time task.
+ */
+export function getNextRecurringDate(
+  task: Pick<Task, "scheduleType" | "priority" | "dueDate" | "dateMode" | "monthlyDay" | "monthlyEndDay">,
+  todayStr: string = getTodayString()
+): string | null {
+  if (!isTaskTrulyRecurring(task)) {
+    return null;
+  }
+  const baseDate = task.dueDate && task.dueDate >= todayStr ? task.dueDate : todayStr;
+  if (task.scheduleType === "daily") {
+    return addDaysToDate(baseDate, 1);
+  }
+  if (task.scheduleType === "every_3_days") {
+    return addDaysToDate(baseDate, 3);
+  }
+  if (task.scheduleType === "weekly") {
+    return addDaysToDate(baseDate, 7);
+  }
+  if (task.scheduleType === "monthly") {
+    if (task.dateMode === "range" && task.monthlyEndDay) {
+      return getNextMonthlyDate(task.monthlyEndDay, true);
+    }
+    if (task.monthlyDay) {
+      return getNextMonthlyDate(task.monthlyDay, true);
+    }
+    return addMonthsToDate(baseDate, 1);
+  }
+  return null;
+}
+
 export function formatTaskScheduleDisplay(task: Task): {
   label: string;
   detail: string;
   shortTag: string;
   badgeClass: string;
 } {
+  if (!isTaskTrulyRecurring(task)) {
+    if (task.dateMode === "range" && task.startDate && task.dueDate) {
+      return {
+        label: "Muddat oralig'ida (1 martalik)",
+        detail: `${formatDateUz(task.startDate)} dan ${formatDateUz(task.dueDate)} gacha`,
+        shortTag: "1 martalik",
+        badgeClass: "bg-slate-100 text-slate-700 border-slate-200",
+      };
+    }
+    return {
+      label: "Bir martalik",
+      detail: formatDateUz(task.dueDate),
+      shortTag: "Bir martalik",
+      badgeClass: "bg-slate-100 text-slate-700 border-slate-200",
+    };
+  }
+
   if (task.scheduleType === "daily") {
     return {
       label: "Har kunlik",
@@ -440,16 +510,6 @@ export function formatTaskScheduleDisplay(task: Task): {
     };
   }
 
-  // Once (Bir martalik)
-  if (task.dateMode === "range" && task.startDate && task.dueDate) {
-    return {
-      label: "Muddat oralig'ida",
-      detail: `${formatDateUz(task.startDate)} dan ${formatDateUz(task.dueDate)} gacha`,
-      shortTag: "Muddat oralig'i",
-      badgeClass: "bg-slate-100 text-slate-700 border-slate-200"
-    };
-  }
-
   return {
     label: "Bir martalik",
     detail: formatDateUz(task.dueDate),
@@ -458,7 +518,7 @@ export function formatTaskScheduleDisplay(task: Task): {
   };
 }
 
-export function getNextMonthlyDate(dayOfMonth: number): string {
+export function getNextMonthlyDate(dayOfMonth: number, forceFuture: boolean = false): string {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth(); // 0-11
@@ -467,7 +527,7 @@ export function getNextMonthlyDate(dayOfMonth: number): string {
   let targetYear = currentYear;
   let targetMonth = currentMonth;
 
-  if (dayOfMonth < todayDate) {
+  if (forceFuture ? dayOfMonth <= todayDate : dayOfMonth < todayDate) {
     targetMonth += 1;
     if (targetMonth > 11) {
       targetMonth = 0;
@@ -696,7 +756,9 @@ export interface TaskOverdueRolloverInfo {
  * including how many times it was delayed/rolled over.
  */
 export function getTaskOverdueRolloverInfo(task: Task): TaskOverdueRolloverInfo | null {
-  if (!task) return null;
+  if (!task || task.isCompleted || task.status === "completed" || Boolean(task.completedAt)) {
+    return null;
+  }
   const autoCount = task.autoRolledCount ?? 0;
   const histCount =
     task.history?.filter(
@@ -740,6 +802,79 @@ export function getTaskOverdueRolloverInfo(task: Task): TaskOverdueRolloverInfo 
 }
 
 /**
+ * Detects unwanted ghost tasks:
+ * 1. Tasks auto-spawned from one-time ("once" or "Takrorlanmas ish") tasks when completed.
+ * 2. Tasks that were explicitly deleted by the user after being spawned.
+ * 3. Accidental duplicate uncompleted recurring tasks on the same dueDate.
+ * Legitimate recurring tasks (daily, every_3_days, weekly, monthly) are preserved!
+ */
+export function detectAutoSpawnedGhostTasks(tasks: Task[], logs: ActivityLog[] = []): string[] {
+  if (!tasks || tasks.length === 0) return [];
+  const ghostIds = new Set<string>();
+
+  const completedTasks = tasks.filter(
+    (t) => t && (t.isCompleted || t.status === "completed" || Boolean(t.completedAt))
+  );
+
+  const deletedLogs = (logs || []).filter((l) => l && l.action === "deleted" && l.taskTitle);
+  const seenRecurringKey = new Set<string>();
+
+  for (const t of tasks) {
+    if (!t || !t.id || t.isCompleted || t.status === "completed" || Boolean(t.completedAt)) {
+      continue;
+    }
+
+    const hasCompletedSteps = (t.steps || []).some((s) => s.completed);
+    if (hasCompletedSteps) continue;
+
+    const cleanTitle = (t.title || "").trim().toLowerCase();
+    const createdMs = t.createdAt ? new Date(t.createdAt).getTime() : NaN;
+
+    if (!isNaN(createdMs)) {
+      // 1. If a one-time task ("once" or "Takrorlanmas ish") was completed and accidentally spawned a copy, purge the copy
+      const spawnedFromOneTimeCompleted = completedTasks.some((comp) => {
+        if (comp.id === t.id) return false;
+        if ((comp.title || "").trim().toLowerCase() !== cleanTitle) return false;
+        if (isTaskTrulyRecurring(comp) && isTaskTrulyRecurring(t)) return false;
+        if (!comp.completedAt) return false;
+        const compMs = new Date(comp.completedAt).getTime();
+        return !isNaN(compMs) && Math.abs(compMs - createdMs) <= 15000;
+      });
+
+      if (spawnedFromOneTimeCompleted) {
+        ghostIds.add(t.id);
+        continue;
+      }
+
+      // 2. If the user explicitly deleted a task with this title AFTER this task was created, purge it
+      const wasDeletedAfterCreation = deletedLogs.some((log) => {
+        const logTitle = (log.taskTitle || "").trim().toLowerCase();
+        if (logTitle !== cleanTitle) return false;
+        const delMs = log.timestamp ? new Date(log.timestamp).getTime() : NaN;
+        return !isNaN(delMs) && delMs >= createdMs;
+      });
+
+      if (wasDeletedAfterCreation) {
+        ghostIds.add(t.id);
+        continue;
+      }
+    }
+
+    // 3. Deduplicate accidental multiple uncompleted recurring instances on the exact same dueDate
+    if (isTaskTrulyRecurring(t) && cleanTitle && t.dueDate) {
+      const recKey = `${cleanTitle}__${t.scheduleType}__${t.dueDate}`;
+      if (seenRecurringKey.has(recKey)) {
+        ghostIds.add(t.id);
+      } else {
+        seenRecurringKey.add(recKey);
+      }
+    }
+  }
+
+  return Array.from(ghostIds);
+}
+
+/**
  * Automatically checks for overdue tasks and rolls them over to today/next day
  * regardless of the number of existing tasks on that day.
  */
@@ -752,25 +887,56 @@ export function checkAndPerformAutoRollover(tasks: Task[]): {
   const deletedSet = getDeletedTaskIds();
   const completedSet = getCompletedTaskIds();
   const changedTasks: Task[] = [];
+  const newlyDetectedCompletedIds: string[] = [];
   let rolledCount = 0;
 
   // First filter out any deleted tasks
-  const activeTasks = (tasks || []).filter((t) => t && t.id && !deletedSet.has(t.id));
+  const activeTasks = (tasks || []).filter(
+    (t) => t && t.id && !deletedSet.has(t.id) && !(t as Task & { isDeleted?: boolean }).isDeleted
+  );
 
-  const updatedTasks = activeTasks.map((task) => {
-    // If task was marked completed in local completedSet, ensure it stays completed
-    if (completedSet.has(task.id) && !task.isCompleted) {
-      const fixedCompleted: Task = {
-        ...task,
-        isCompleted: true,
-        status: "completed" as const,
-      };
-      changedTasks.push(fixedCompleted);
-      return fixedCompleted;
+  const updatedTasks = activeTasks.map((rawTask) => {
+    // Normalize any "Takrorlanmas ish" task that had a non-once scheduleType from old form defaults
+    let task = rawTask;
+    if (task.priority && task.priority.startsWith("Takrorlanmas ish") && task.scheduleType !== "once") {
+      task = { ...task, scheduleType: "once" };
+      changedTasks.push(task);
     }
 
-    // If completed or not past due, do not touch
-    if (task.isCompleted || task.status === "completed" || task.dueDate >= today) {
+    const allStepsDone =
+      Array.isArray(task.steps) &&
+      task.steps.length > 0 &&
+      task.steps.every((s) => Boolean(s.completed));
+
+    const shouldBeCompleted =
+      task.isCompleted ||
+      task.status === "completed" ||
+      Boolean(task.completedAt) ||
+      Boolean(task.completionNote) ||
+      Boolean(task.completedBy) ||
+      completedSet.has(task.id) ||
+      allStepsDone;
+
+    // If task was marked completed, ensure it stays completed and NEVER rolls over to the next day
+    if (shouldBeCompleted) {
+      if (!completedSet.has(task.id)) {
+        newlyDetectedCompletedIds.push(task.id);
+      }
+      if (!task.isCompleted || task.status !== "completed") {
+        const fixedCompleted: Task = {
+          ...task,
+          isCompleted: true,
+          status: "completed" as const,
+          completedAt: task.completedAt || new Date().toISOString(),
+        };
+        changedTasks.push(fixedCompleted);
+        return fixedCompleted;
+      }
+      return task;
+    }
+
+    // If not past due, do not touch
+    if (!task.dueDate || task.dueDate >= today) {
       return task;
     }
 
@@ -838,6 +1004,10 @@ export function checkAndPerformAutoRollover(tasks: Task[]): {
     changedTasks.push(rolledTask);
     return rolledTask;
   });
+
+  if (newlyDetectedCompletedIds.length > 0) {
+    markTasksAsCompleted(newlyDetectedCompletedIds);
+  }
 
   if (rolledCount > 0 || changedTasks.length > 0) {
     saveStoredTasks(updatedTasks);

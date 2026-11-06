@@ -1,5 +1,5 @@
 // Service Worker for Vazifalar Boshqaruvi PWA
-const CACHE_NAME = "vazifalar-pwa-v2";
+const CACHE_NAME = "vazifalar-pwa-v6";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
@@ -47,39 +47,26 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Network-first strategy so the browser always executes the latest application code when online
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Stale-while-revalidate for faster offline and online performance
-        fetch(event.request)
-          .then((networkResponse) => {
-            if (networkResponse && networkResponse.status === 200) {
-              const responseClone = networkResponse.clone();
-              caches.open(CACHE_NAME).then((cache) => {
-                cache.put(event.request, responseClone);
-              });
-            }
-          })
-          .catch(() => {});
-        return cachedResponse;
-      }
-
-      return fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
-          }
-          return networkResponse;
-        })
-        .catch(() => {
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) return cachedResponse;
           if (event.request.mode === "navigate") {
             return caches.match("/index.html");
           }
           return new Response("Offline", { status: 503, statusText: "Offline" });
         });
-    })
+      })
   );
 });

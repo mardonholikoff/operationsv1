@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Task, ActivityLog, User } from "./types";
 import {
   getStoredTasks,
@@ -7,10 +7,10 @@ import {
   saveStoredLogs,
   addActivityLog,
   checkAndPerformAutoRollover,
+  detectAutoSpawnedGhostTasks,
   getTodayString,
-  getNextMonthlyDate,
-  addDaysToDate,
-  addMonthsToDate,
+  isTaskTrulyRecurring,
+  getNextRecurringDate,
   rememberTaskAsTemplate,
   getDeletedTaskIds,
   markTasksAsDeleted,
@@ -27,6 +27,8 @@ import {
   deleteTasksBatchFirestore,
   saveActivityLogFirestore,
   clearAllLogsFirestore,
+  syncDeletedIdsToCloud,
+  syncCompletedIdsToCloud,
 } from "./services/firebase";
 import {
   enqueueSaveTask,
@@ -73,6 +75,13 @@ export function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isFromCache, setIsFromCache] = useState<boolean>(false);
   const [pendingCount, setPendingCount] = useState<number>(() => getPendingQueueCount());
+
+  // Track whether we have received a confirmed live snapshot from Firestore server
+  const hasLiveSnapshotRef = useRef<boolean>(false);
+  const logsRef = useRef<ActivityLog[]>(logs);
+  useEffect(() => {
+    logsRef.current = logs;
+  }, [logs]);
 
   // Modals state
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -125,7 +134,7 @@ export function App() {
 
     // 1. Add all non-deleted cloud tasks
     cloudTasks.forEach((t) => {
-      if (t && t.id && !deletedSet.has(t.id)) {
+      if (t && t.id && !deletedSet.has(t.id) && !(t as Task & { isDeleted?: boolean }).isDeleted) {
         if (completedSet.has(t.id) && !t.isCompleted) {
           map.set(t.id, { ...t, isCompleted: true, status: "completed" });
         } else {
@@ -138,7 +147,15 @@ export function App() {
     queue.forEach((mutation) => {
       if (mutation.type === "save_task" && mutation.task) {
         if (!deletedSet.has(mutation.task.id)) {
-          map.set(mutation.task.id, mutation.task);
+          if (completedSet.has(mutation.task.id) && !mutation.task.isCompleted) {
+            map.set(mutation.task.id, {
+              ...mutation.task,
+              isCompleted: true,
+              status: "completed",
+            });
+          } else {
+            map.set(mutation.task.id, mutation.task);
+          }
         }
       } else if (mutation.type === "delete_task" && mutation.taskId) {
         map.delete(mutation.taskId);
@@ -150,14 +167,12 @@ export function App() {
 
   // Initial load and Real-time Firebase Firestore Listeners
   useEffect(() => {
-    // 1. Check auto-rollover for local state on startup (do not push stale localStorage to Firestore before live snapshot arrives)
+    // 1. Load local state without pushing unverified stale localStorage rollovers to Firestore
     const initialLocalTasks = getStoredTasks();
     const initialLocalLogs = getStoredLogs();
 
-    const { updatedTasks, rolledCount } = checkAndPerformAutoRollover(initialLocalTasks);
-    setTasks(updatedTasks);
+    setTasks(initialLocalTasks);
     setLogs(initialLocalLogs);
-    setRolledOverCount(rolledCount);
     setPendingCount(getPendingQueueCount());
 
     // 2. If online, flush any pending offline mutations immediately
@@ -169,28 +184,53 @@ export function App() {
     const unsubscribeTasks = subscribeToTasksFirestore(
       (firestoreTasks, fromCache) => {
         setIsFromCache(fromCache);
+        if (!fromCache) {
+          hasLiveSnapshotRef.current = true;
+        }
+
         if (Array.isArray(firestoreTasks)) {
           // Merge with any local pending un-flushed offline tasks and tombstones
-          const merged = mergeWithOfflineQueue(firestoreTasks);
-          // Automatically roll over any uncompleted overdue tasks arriving from Firestore
-          const { updatedTasks: rolledMerged, rolledCount: incomingRolled, changedTasks: incomingChanged } =
-            checkAndPerformAutoRollover(merged);
+          let merged = mergeWithOfflineQueue(firestoreTasks);
 
-          setTasks(rolledMerged);
-          saveStoredTasks(rolledMerged);
-
-          // Only write auto-rolled changes back to Firestore when snapshot is confirmed from live server (!fromCache)
-          if (!fromCache && incomingChanged.length > 0) {
-            if (incomingRolled > 0) {
-              setRolledOverCount((prev) => prev + incomingRolled);
-            }
-            if (navigator.onLine) {
-              saveTasksBatchFirestore(incomingChanged).catch(() => {
-                incomingChanged.forEach((t) => enqueueSaveTask(t));
+          // Automatically detect and purge any ghost tasks that were previously auto-spawned on completion
+          const ghostIds = detectAutoSpawnedGhostTasks(merged, logsRef.current);
+          if (ghostIds.length > 0) {
+            markTasksAsDeleted(ghostIds);
+            const ghostSet = new Set(ghostIds);
+            merged = merged.filter((t) => !ghostSet.has(t.id));
+            if (!fromCache && navigator.onLine) {
+              deleteTasksBatchFirestore(ghostIds).catch(() => {
+                enqueueDeleteTasksBatch(ghostIds);
               });
-            } else {
-              incomingChanged.forEach((t) => enqueueSaveTask(t));
             }
+          }
+
+          // Only perform and persist auto-rollover once we have a live snapshot (!fromCache)
+          // or if offline
+          if (!fromCache || !navigator.onLine) {
+            const {
+              updatedTasks: rolledMerged,
+              rolledCount: incomingRolled,
+              changedTasks: incomingChanged,
+            } = checkAndPerformAutoRollover(merged);
+
+            setTasks(rolledMerged);
+            saveStoredTasks(rolledMerged);
+
+            if (!fromCache && incomingChanged.length > 0) {
+              if (incomingRolled > 0) {
+                setRolledOverCount((prev) => prev + incomingRolled);
+              }
+              if (navigator.onLine) {
+                saveTasksBatchFirestore(incomingChanged).catch(() => {
+                  incomingChanged.forEach((t) => enqueueSaveTask(t));
+                });
+              } else {
+                incomingChanged.forEach((t) => enqueueSaveTask(t));
+              }
+            }
+          } else {
+            setTasks(merged);
           }
         }
       },
@@ -204,6 +244,7 @@ export function App() {
       (firestoreLogs, fromCache) => {
         setIsFromCache(fromCache);
         if (Array.isArray(firestoreLogs) && firestoreLogs.length > 0) {
+          logsRef.current = firestoreLogs;
           setLogs(firestoreLogs);
           saveStoredLogs(firestoreLogs);
         }
@@ -231,23 +272,31 @@ export function App() {
       }
     }, 4000);
 
-    // Periodic check (every 15 seconds) to immediately roll over uncompleted overdue tasks (e.g. at midnight or day rollover)
+    // Periodic check (every 15 seconds) to roll over uncompleted overdue tasks ONLY after live snapshot is confirmed
     const rolloverInterval = setInterval(() => {
+      if (navigator.onLine && !hasLiveSnapshotRef.current) return;
       setTasks((currentTasks) => {
         const today = getTodayString();
+        const deletedSet = getDeletedTaskIds();
+        const completedSet = getCompletedTaskIds();
         const hasOverdueUncompleted = currentTasks.some(
-          (t) => !t.isCompleted && t.dueDate < today
+          (t) =>
+            !t.isCompleted &&
+            t.status !== "completed" &&
+            !completedSet.has(t.id) &&
+            !deletedSet.has(t.id) &&
+            t.dueDate < today
         );
         if (hasOverdueUncompleted) {
           const { updatedTasks: rolled, rolledCount: count, changedTasks: changed } =
             checkAndPerformAutoRollover(currentTasks);
           if (count > 0 && changed.length > 0) {
             setRolledOverCount((prev) => prev + count);
-            if (navigator.onLine) {
+            if (navigator.onLine && hasLiveSnapshotRef.current) {
               saveTasksBatchFirestore(changed).catch(() => {
                 changed.forEach((t) => enqueueSaveTask(t));
               });
-            } else {
+            } else if (!navigator.onLine) {
               changed.forEach((t) => enqueueSaveTask(t));
             }
             return rolled;
@@ -258,21 +307,29 @@ export function App() {
     }, 15000);
 
     const handleVisibilityOrFocus = () => {
+      if (navigator.onLine && !hasLiveSnapshotRef.current) return;
       setTasks((currentTasks) => {
         const today = getTodayString();
+        const deletedSet = getDeletedTaskIds();
+        const completedSet = getCompletedTaskIds();
         const hasOverdueUncompleted = currentTasks.some(
-          (t) => !t.isCompleted && t.dueDate < today
+          (t) =>
+            !t.isCompleted &&
+            t.status !== "completed" &&
+            !completedSet.has(t.id) &&
+            !deletedSet.has(t.id) &&
+            t.dueDate < today
         );
         if (hasOverdueUncompleted) {
           const { updatedTasks: rolled, rolledCount: count, changedTasks: changed } =
             checkAndPerformAutoRollover(currentTasks);
           if (count > 0 && changed.length > 0) {
             setRolledOverCount((prev) => prev + count);
-            if (navigator.onLine) {
+            if (navigator.onLine && hasLiveSnapshotRef.current) {
               saveTasksBatchFirestore(changed).catch(() => {
                 changed.forEach((t) => enqueueSaveTask(t));
               });
-            } else {
+            } else if (!navigator.onLine) {
               changed.forEach((t) => enqueueSaveTask(t));
             }
             return rolled;
@@ -426,7 +483,10 @@ export function App() {
     completeEntireTask?: boolean
   ) => {
     let targetedTask: Task | undefined;
+    let spawnedRecurringTask: Task | null = null;
     let willAllBeCompleted = false;
+    const today = getTodayString();
+    const nowIso = new Date().toISOString();
 
     const updated = tasks.map((task) => {
       if (task.id === taskId) {
@@ -439,31 +499,80 @@ export function App() {
               actualMinutes: nextCompleted
                 ? (typeof actualMinutes === "number" ? actualMinutes : step.actualMinutes)
                 : undefined,
-              completedAt: nextCompleted ? new Date().toISOString() : undefined,
+              completedAt: nextCompleted ? nowIso : undefined,
             };
           }
-          return step;
+          return completeEntireTask ? { ...step, completed: true, completedAt: step.completedAt || nowIso } : step;
         });
 
         const isNowAllCompleted =
           updatedSteps.length > 0 && updatedSteps.every((s) => s.completed);
         const wasTaskCompleted = task.isCompleted;
 
-        // Foydalanuvchi oxirgi amalni ham tick qilib barcha amallarni tugatganida yoki butun vazifani yakunlashni tanlaganida
-        if ((isNowAllCompleted || completeEntireTask) && !wasTaskCompleted) {
-          willAllBeCompleted = true;
-        }
-
-        // Agar avval bajarilgan vazifaning biror amali tick'dan chiqarilsa (uncheck):
         let newIsCompleted = task.isCompleted;
         let newStatus = task.status;
         let newActualDuration = task.actualDuration;
+        let newCompletedAt = task.completedAt;
+        let newCompletedBy = task.completedBy;
 
-        if (wasTaskCompleted && !isNowAllCompleted && !completeEntireTask) {
+        // Foydalanuvchi oxirgi amalni ham tick qilib barcha amallarni tugatganida yoki butun vazifani yakunlashni tanlaganida:
+        // Darhol bajarildi (isCompleted: true) holatiga o'tkazamiz (ertasi kuni kechikkan bo'lib qaytib chiqmasligi uchun!)
+        if ((isNowAllCompleted || completeEntireTask) && !wasTaskCompleted) {
+          willAllBeCompleted = true;
+          newIsCompleted = true;
+          newStatus = "completed";
+          newCompletedAt = nowIso;
+          newCompletedBy = currentUser?.username || "operator";
+          markTasksAsCompleted([task.id]);
+          syncCompletedIdsToCloud([task.id]).catch(() => {});
+
+          // Agar vazifa haqiqatan davriy takrorlanuvchi bo'lsa (daily, every_3_days, weekly, monthly),
+          // izoh modali yopib yuborilgan taqdirda ham keyingi muddat uchun nusxasi ochilishini ta'minlaymiz
+          const nextDueDate = getNextRecurringDate(task, today);
+          if (nextDueDate && isTaskTrulyRecurring(task)) {
+            const alreadyExists = tasks.some(
+              (t) =>
+                t.id !== task.id &&
+                !t.isCompleted &&
+                t.title.trim().toLowerCase() === task.title.trim().toLowerCase() &&
+                t.dueDate >= nextDueDate
+            );
+            if (!alreadyExists) {
+              spawnedRecurringTask = {
+                id: "task-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+                title: task.title,
+                priority: task.priority,
+                scheduleType: task.scheduleType,
+                dateMode: task.dateMode,
+                monthlyDay: task.monthlyDay,
+                monthlyStartDay: task.monthlyStartDay,
+                monthlyEndDay: task.monthlyEndDay,
+                startDate: nextDueDate,
+                dueDate: nextDueDate,
+                dueTime: task.dueTime,
+                estimatedDuration: task.estimatedDuration,
+                status: "pending",
+                isCompleted: false,
+                createdAt: nowIso,
+                createdBy: task.createdBy || currentUser?.username || "operator1",
+                steps: (task.steps || []).map((s, idx) => ({
+                  id: `step-${Date.now()}-${idx}`,
+                  text: s.text,
+                  completed: false,
+                  estimatedMinutes: s.estimatedMinutes,
+                })),
+                history: [],
+              };
+            }
+          }
+        } else if (wasTaskCompleted && !isNowAllCompleted && !completeEntireTask) {
+          // Agar avval bajarilgan vazifaning biror amali tick'dan chiqarilsa (uncheck):
           newIsCompleted = false;
           newStatus = "pending";
           newActualDuration = undefined;
+          newCompletedAt = undefined;
           unmarkTaskCompleted(task.id);
+          syncCompletedIdsToCloud([], [task.id]).catch(() => {});
         }
 
         const updatedTask: Task = {
@@ -472,6 +581,8 @@ export function App() {
           isCompleted: newIsCompleted,
           status: newStatus,
           actualDuration: newActualDuration,
+          completedAt: newCompletedAt,
+          completedBy: newCompletedBy,
         };
         targetedTask = updatedTask;
         return updatedTask;
@@ -479,8 +590,9 @@ export function App() {
       return task;
     });
 
-    setTasks(updated);
-    saveStoredTasks(updated);
+    const finalTasks = spawnedRecurringTask ? [spawnedRecurringTask, ...updated] : updated;
+    setTasks(finalTasks);
+    saveStoredTasks(finalTasks);
 
     if (targetedTask) {
       if (navigator.onLine) {
@@ -493,61 +605,60 @@ export function App() {
       }
     }
 
+    if (spawnedRecurringTask) {
+      const toSaveSpawned: Task = spawnedRecurringTask;
+      if (navigator.onLine) {
+        saveTaskFirestore(toSaveSpawned).catch(() => {
+          enqueueSaveTask(toSaveSpawned);
+        });
+      } else {
+        enqueueSaveTask(toSaveSpawned);
+        setPendingCount(getPendingQueueCount());
+      }
+    }
+
     // Amallarni tick qilib belgilab bajarildi deb qo'yganda:
-    // Sarflangan vaqtni kiritish va tejalgan vaqtni kundan chiqarish modali darhol ochilsin!
+    // Qo'shimcha izoh va sarflangan vaqtni kiritish modali ochiladi (lekin vazifa allaqachon Bajarildi sifatida saqlangan bo'ladi)
     if (willAllBeCompleted && targetedTask) {
       setTaskToComplete(targetedTask);
       setIsCompleteModalOpen(true);
     }
   };
 
-  const handleConfirmComplete = (taskId: string, note: string, actualDuration?: number) => {
+  const handleConfirmComplete = (
+    taskId: string,
+    note: string,
+    actualDuration?: number,
+    spawnNext?: boolean
+  ) => {
     markTasksAsCompleted([taskId]);
+    syncCompletedIdsToCloud([taskId]).catch(() => {});
 
     let completedTaskTitle = "";
     let spawnedTask: Task | null = null;
     let targetUpdatedTask: Task | null = null;
     let taskEstimatedDuration: number | undefined;
+    let cancelledRecurringTitle: string | null = null;
     const today = getTodayString();
+    const nowIso = new Date().toISOString();
 
     const updated = tasks.map((task) => {
       if (task.id === taskId) {
         completedTaskTitle = task.title;
         taskEstimatedDuration = task.estimatedDuration;
 
-        // If it's a recurring task, calculate the next occurrence
-        if (
-          task.scheduleType === "daily" ||
-          task.scheduleType === "every_3_days" ||
-          task.scheduleType === "weekly" ||
-          task.scheduleType === "monthly"
-        ) {
-          const baseDate = task.dueDate && task.dueDate >= today ? task.dueDate : today;
-          let nextDueDate = baseDate;
+        const isRecurring = isTaskTrulyRecurring(task);
+        const shouldSpawnNext = spawnNext !== undefined ? spawnNext : isRecurring;
+        const nextDueDate = getNextRecurringDate(task, today);
 
-          if (task.scheduleType === "daily") {
-            nextDueDate = addDaysToDate(baseDate, 1);
-          } else if (task.scheduleType === "every_3_days") {
-            nextDueDate = addDaysToDate(baseDate, 3);
-          } else if (task.scheduleType === "weekly") {
-            nextDueDate = addDaysToDate(baseDate, 7);
-          } else if (task.scheduleType === "monthly") {
-            if (task.dateMode === "range" && task.monthlyEndDay) {
-              nextDueDate = getNextMonthlyDate(task.monthlyEndDay);
-            } else if (task.monthlyDay) {
-              nextDueDate = getNextMonthlyDate(task.monthlyDay);
-            } else {
-              nextDueDate = addMonthsToDate(baseDate, 1);
-            }
-          }
-
-          // Check if an uncompleted copy of this recurring task already exists for nextDueDate or later
+        // Davriy vazifalar (daily, every_3_days, weekly, monthly) uchun keyingi muddatga yangi vazifa ochamiz;
+        // Bir martalik vazifalar ("once" yoki "Takrorlanmas ish") uchun esa hech qachon yangi nusxa ochilmaydi!
+        if (shouldSpawnNext && isRecurring && nextDueDate) {
           const alreadyExists = tasks.some(
             (t) =>
               t.id !== task.id &&
               !t.isCompleted &&
               t.title.trim().toLowerCase() === task.title.trim().toLowerCase() &&
-              t.scheduleType === task.scheduleType &&
               t.dueDate >= nextDueDate
           );
 
@@ -567,7 +678,7 @@ export function App() {
               estimatedDuration: task.estimatedDuration,
               status: "pending",
               isCompleted: false,
-              createdAt: new Date().toISOString(),
+              createdAt: nowIso,
               createdBy: task.createdBy || currentUser?.username || "operator1",
               steps: (task.steps || []).map((s, idx) => ({
                 id: `step-${Date.now()}-${idx}`,
@@ -578,13 +689,17 @@ export function App() {
               history: [],
             };
           }
+        } else if (isRecurring && spawnNext === false) {
+          // Foydalanuvchi modalda keyingi kunga takrorlashni o'chirgan bo'lsa, vazifani bir martalikka aylantiramiz
+          cancelledRecurringTitle = task.title.trim().toLowerCase();
         }
 
         const compTask: Task = {
           ...task,
+          scheduleType: !shouldSpawnNext ? "once" : task.scheduleType,
           steps: (task.steps || []).map((s) => ({ ...s, completed: true })),
           isCompleted: true,
-          completedAt: new Date().toISOString(),
+          completedAt: nowIso,
           completionNote: note,
           completedBy: currentUser?.username || "operator",
           status: "completed" as const,
@@ -598,7 +713,34 @@ export function App() {
       return task;
     });
 
-    const finalTasks = spawnedTask ? [spawnedTask, ...updated] : updated;
+    let finalTasks = spawnedTask ? [spawnedTask, ...updated] : updated;
+
+    // Agar foydalanuvchi takrorlashni bekor qilgan bo'lsa (spawnNext === false), oldinroq ochilgan kelgusi nusxasini ham tozalaymiz
+    if (cancelledRecurringTitle) {
+      const idsToCancel = finalTasks
+        .filter(
+          (t) =>
+            t.id !== taskId &&
+            !t.isCompleted &&
+            t.title.trim().toLowerCase() === cancelledRecurringTitle &&
+            t.dueDate > today
+        )
+        .map((t) => t.id);
+
+      if (idsToCancel.length > 0) {
+        markTasksAsDeleted(idsToCancel);
+        syncDeletedIdsToCloud(idsToCancel).catch(() => {});
+        const cancelSet = new Set(idsToCancel);
+        finalTasks = finalTasks.filter((t) => !cancelSet.has(t.id));
+        if (navigator.onLine) {
+          deleteTasksBatchFirestore(idsToCancel).catch(() => {
+            enqueueDeleteTasksBatch(idsToCancel);
+          });
+        } else {
+          enqueueDeleteTasksBatch(idsToCancel);
+        }
+      }
+    }
 
     setTasks(finalTasks);
     saveStoredTasks(finalTasks);
@@ -643,7 +785,7 @@ export function App() {
 
     const log1: ActivityLog = {
       id: "log-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       operator: currentUser?.username || "operator",
       action: "completed",
       taskTitle: completedTaskTitle,
@@ -660,11 +802,11 @@ export function App() {
     if (spawnedTask) {
       const log2: ActivityLog = {
         id: "log-" + (Date.now() + 1) + "-" + Math.random().toString(36).substring(2, 6),
-        timestamp: new Date().toISOString(),
+        timestamp: nowIso,
         operator: "Tizim",
         action: "created",
         taskTitle: (spawnedTask as Task).title,
-        details: `Davriy takrorlanuvchi keyingi eslatma (${(spawnedTask as Task).dueDate}) avtomatik ro'yxatga qo'shildi.`,
+        details: `Davriy takrorlanuvchi keyingi eslatma (${(spawnedTask as Task).dueDate}) ro'yxatga qo'shildi.`,
       };
       addActivityLog(log2);
       if (navigator.onLine) {
@@ -848,20 +990,42 @@ export function App() {
     const taskToRemove = tasks.find((t) => t.id === taskId);
     if (!taskToRemove) return;
 
-    // Permanently tombstone the deleted task ID so it never resurfaces from cache or rollover
-    markTasksAsDeleted([taskId]);
+    const cleanTitle = (taskToRemove.title || "").trim().toLowerCase();
 
-    const updated = tasks.filter((t) => t.id !== taskId);
+    // Also include any uncompleted duplicate/spawned copies of this exact task so it never comes back tomorrow
+    const duplicateUncompletedIds = tasks
+      .filter(
+        (t) =>
+          t.id !== taskId &&
+          !t.isCompleted &&
+          (t.title || "").trim().toLowerCase() === cleanTitle
+      )
+      .map((t) => t.id);
+
+    const allIdsToDelete = Array.from(new Set([taskId, ...duplicateUncompletedIds]));
+
+    // Permanently tombstone all deleted task IDs locally and in Firestore
+    markTasksAsDeleted(allIdsToDelete);
+    syncDeletedIdsToCloud(allIdsToDelete).catch(() => {});
+
+    const deleteSet = new Set(allIdsToDelete);
+    const updated = tasks.filter((t) => !deleteSet.has(t.id));
     setTasks(updated);
     saveStoredTasks(updated);
 
     // Delete directly from Firebase Firestore if online, or enqueue delete if offline
     if (navigator.onLine) {
-      deleteTaskFirestore(taskId).catch(() => {
-        enqueueDeleteTask(taskId);
-      });
+      if (allIdsToDelete.length === 1) {
+        deleteTaskFirestore(taskId).catch(() => {
+          enqueueDeleteTask(taskId);
+        });
+      } else {
+        deleteTasksBatchFirestore(allIdsToDelete).catch(() => {
+          enqueueDeleteTasksBatch(allIdsToDelete);
+        });
+      }
     } else {
-      enqueueDeleteTask(taskId);
+      enqueueDeleteTasksBatch(allIdsToDelete);
     }
 
     const logItem: ActivityLog = {
@@ -870,7 +1034,10 @@ export function App() {
       operator: currentUser?.username || "operator",
       action: "deleted",
       taskTitle: taskToRemove.title,
-      details: "Vazifa tizimdan o'chirildi.",
+      details:
+        allIdsToDelete.length > 1
+          ? `Vazifa va uning ${allIdsToDelete.length - 1} ta takroriy nusxasi tizimdan butunlay o'chirildi.`
+          : "Vazifa tizimdan butunlay o'chirildi.",
     };
 
     addActivityLog(logItem);
@@ -891,55 +1058,41 @@ export function App() {
     if (!taskIds || taskIds.length === 0) return;
     const idSet = new Set(taskIds);
     markTasksAsCompleted(taskIds);
+    syncCompletedIdsToCloud(taskIds).catch(() => {});
 
-    const nowIso = new Date().toISOString();
     const today = getTodayString();
+    const nowIso = new Date().toISOString();
     const operatorName = currentUser?.username || "operator";
     const changedTasks: Task[] = [];
     const spawnedTasks: Task[] = [];
+    const spawnedKeys = new Set<string>();
 
+    // Ommaviy "Bajarildi" qilinganda:
+    // - Bir martalik vazifalar ("once" yoki "Takrorlanmas ish") butunlay yopiladi va qaytib chiqmaydi.
+    // - Davriy takrorlanuvchi vazifalar (daily, every_3_days, weekly, monthly) uchun esa keyingi muddatga yangi eslatma yaratiladi.
     const updated = tasks.map((task) => {
       if (!idSet.has(task.id) || task.isCompleted) {
         return task;
       }
 
-      if (
-        task.scheduleType === "daily" ||
-        task.scheduleType === "every_3_days" ||
-        task.scheduleType === "weekly" ||
-        task.scheduleType === "monthly"
-      ) {
-        const baseDate = task.dueDate && task.dueDate >= today ? task.dueDate : today;
-        let nextDueDate = baseDate;
-
-        if (task.scheduleType === "daily") {
-          nextDueDate = addDaysToDate(baseDate, 1);
-        } else if (task.scheduleType === "every_3_days") {
-          nextDueDate = addDaysToDate(baseDate, 3);
-        } else if (task.scheduleType === "weekly") {
-          nextDueDate = addDaysToDate(baseDate, 7);
-        } else if (task.scheduleType === "monthly") {
-          if (task.dateMode === "range" && task.monthlyEndDay) {
-            nextDueDate = getNextMonthlyDate(task.monthlyEndDay);
-          } else if (task.monthlyDay) {
-            nextDueDate = getNextMonthlyDate(task.monthlyDay);
-          } else {
-            nextDueDate = addMonthsToDate(baseDate, 1);
-          }
-        }
-
-        const alreadyExists = tasks.some(
-          (t) =>
-            !idSet.has(t.id) &&
-            !t.isCompleted &&
-            t.title.trim().toLowerCase() === task.title.trim().toLowerCase() &&
-            t.scheduleType === task.scheduleType &&
-            t.dueDate >= nextDueDate
-        );
+      const nextDueDate = getNextRecurringDate(task, today);
+      if (nextDueDate && isTaskTrulyRecurring(task)) {
+        const cleanTitle = task.title.trim().toLowerCase();
+        const recKey = `${cleanTitle}__${nextDueDate}`;
+        const alreadyExists =
+          spawnedKeys.has(recKey) ||
+          tasks.some(
+            (t) =>
+              !idSet.has(t.id) &&
+              !t.isCompleted &&
+              t.title.trim().toLowerCase() === cleanTitle &&
+              t.dueDate >= nextDueDate
+          );
 
         if (!alreadyExists) {
-          const sp: Task = {
-            id: `task-${Date.now()}-${spawnedTasks.length}-${Math.random().toString(36).substring(2, 7)}`,
+          spawnedKeys.add(recKey);
+          const nextTask: Task = {
+            id: "task-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7) + "-" + spawnedTasks.length,
             title: task.title,
             priority: task.priority,
             scheduleType: task.scheduleType,
@@ -956,15 +1109,14 @@ export function App() {
             createdAt: nowIso,
             createdBy: task.createdBy || operatorName,
             steps: (task.steps || []).map((s, idx) => ({
-              id: `step-${Date.now()}-${idx}`,
+              id: `step-${Date.now()}-${idx}-${spawnedTasks.length}`,
               text: s.text,
               completed: false,
               estimatedMinutes: s.estimatedMinutes,
             })),
             history: [],
           };
-          spawnedTasks.push(sp);
-          changedTasks.push(sp);
+          spawnedTasks.push(nextTask);
         }
       }
 
@@ -985,13 +1137,14 @@ export function App() {
     setTasks(finalTasks);
     saveStoredTasks(finalTasks);
 
-    if (changedTasks.length > 0) {
+    const allToPersist = [...changedTasks, ...spawnedTasks];
+    if (allToPersist.length > 0) {
       if (navigator.onLine) {
-        saveTasksBatchFirestore(changedTasks).catch(() => {
-          changedTasks.forEach((t) => enqueueSaveTask(t));
+        saveTasksBatchFirestore(allToPersist).catch(() => {
+          allToPersist.forEach((t) => enqueueSaveTask(t));
         });
       } else {
-        changedTasks.forEach((t) => enqueueSaveTask(t));
+        allToPersist.forEach((t) => enqueueSaveTask(t));
       }
     }
 
@@ -1000,8 +1153,8 @@ export function App() {
       timestamp: nowIso,
       operator: operatorName,
       action: "completed",
-      taskTitle: `${changedTasks.length - spawnedTasks.length} ta vazifa`,
-      details: `Jadval orqali birdaniga ${changedTasks.length - spawnedTasks.length} ta vazifa "Bajarildi" deb belgilandi.${note ? ` Izoh: ${note}` : ""}`,
+      taskTitle: `${changedTasks.length} ta vazifa`,
+      details: `Jadval orqali birdaniga ${changedTasks.length} ta vazifa "Bajarildi" deb belgilandi.${note ? ` Izoh: ${note}` : ""}`,
     };
 
     addActivityLog(logItem);
@@ -1017,27 +1170,48 @@ export function App() {
 
   const handleBulkDeleteTasks = (taskIds: string[]) => {
     if (!taskIds || taskIds.length === 0) return;
-    const idSet = new Set(taskIds);
+    const initialSet = new Set(taskIds);
 
-    // Permanently tombstone all deleted task IDs
-    markTasksAsDeleted(taskIds);
+    // Find titles of selected tasks so any uncompleted auto-spawned duplicate copies are also purged
+    const selectedTitles = new Set(
+      tasks
+        .filter((t) => initialSet.has(t.id))
+        .map((t) => (t.title || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    const duplicateUncompletedIds = tasks
+      .filter(
+        (t) =>
+          !initialSet.has(t.id) &&
+          !t.isCompleted &&
+          selectedTitles.has((t.title || "").trim().toLowerCase())
+      )
+      .map((t) => t.id);
+
+    const allIdsToDelete = Array.from(new Set([...taskIds, ...duplicateUncompletedIds]));
+    const deleteSet = new Set(allIdsToDelete);
+
+    // Permanently tombstone all deleted task IDs locally and in Firestore
+    markTasksAsDeleted(allIdsToDelete);
+    syncDeletedIdsToCloud(allIdsToDelete).catch(() => {});
 
     const removedTitles = tasks
-      .filter((t) => idSet.has(t.id))
+      .filter((t) => initialSet.has(t.id))
       .map((t) => t.title)
       .slice(0, 3)
       .join(", ");
 
-    const updated = tasks.filter((t) => !idSet.has(t.id));
+    const updated = tasks.filter((t) => !deleteSet.has(t.id));
     setTasks(updated);
     saveStoredTasks(updated);
 
     if (navigator.onLine) {
-      deleteTasksBatchFirestore(taskIds).catch(() => {
-        enqueueDeleteTasksBatch(taskIds);
+      deleteTasksBatchFirestore(allIdsToDelete).catch(() => {
+        enqueueDeleteTasksBatch(allIdsToDelete);
       });
     } else {
-      enqueueDeleteTasksBatch(taskIds);
+      enqueueDeleteTasksBatch(allIdsToDelete);
     }
 
     const logItem: ActivityLog = {
@@ -1046,7 +1220,7 @@ export function App() {
       operator: currentUser?.username || "operator",
       action: "deleted",
       taskTitle: `${taskIds.length} ta vazifa (${removedTitles}${taskIds.length > 3 ? "..." : ""})`,
-      details: `Jadval orqali tanlangan ${taskIds.length} ta vazifa tizimdan butunlay o'chirildi.`,
+      details: `Jadval orqali tanlangan ${allIdsToDelete.length} ta vazifa tizimdan butunlay o'chirildi.`,
     };
 
     addActivityLog(logItem);

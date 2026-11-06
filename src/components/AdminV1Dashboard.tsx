@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Task } from "../types";
-import { formatDateUz, formatCreatedAtUz, getTodayString, getTaskOverdueRolloverInfo } from "../services/storage";
+import { formatDateUz, formatCreatedAtUz, getTodayString, addDaysToDate, getTaskOverdueRolloverInfo } from "../services/storage";
 import {
   DAILY_WORK_HOURS,
   DAILY_WORK_MINUTES,
@@ -64,15 +64,11 @@ export const AdminV1Dashboard: React.FC<AdminV1DashboardProps> = ({ tasks, onOpe
   const [dayPriorityFilter, setDayPriorityFilter] = useState<string | null>(null);
 
   const handlePrevDay = () => {
-    const d = new Date(selectedDay);
-    d.setDate(d.getDate() - 1);
-    setSelectedDay(d.toISOString().split("T")[0]);
+    setSelectedDay((prev) => addDaysToDate(prev, -1));
   };
 
   const handleNextDay = () => {
-    const d = new Date(selectedDay);
-    d.setDate(d.getDate() + 1);
-    setSelectedDay(d.toISOString().split("T")[0]);
+    setSelectedDay((prev) => addDaysToDate(prev, 1));
   };
 
   const handleToday = () => {
