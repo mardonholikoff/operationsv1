@@ -111,6 +111,7 @@ export const MonthlyAnalyticsModal: React.FC<MonthlyAnalyticsModalProps> = ({
   const [selectedYear, setSelectedYear] = useState<number>(today.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(today.getMonth()); // 0-indexed
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const [hoveredDay, setHoveredDay] = useState<number | null>(null);
 
   if (!isOpen) return null;
 
@@ -235,7 +236,7 @@ export const MonthlyAnalyticsModal: React.FC<MonthlyAnalyticsModalProps> = ({
   };
 
   // Days breakdown inside the month
-  const dailyDistribution: { day: number; total: number; completed: number }[] = [];
+  const dailyDistribution: { day: number; dateStr: string; total: number; completed: number; tasks: Task[] }[] = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const dayDateStr = `${currentYearMonth}-${String(d).padStart(2, "0")}`;
     const tasksOnDay = monthTasks.filter(
@@ -246,8 +247,10 @@ export const MonthlyAnalyticsModal: React.FC<MonthlyAnalyticsModalProps> = ({
     const doneOnDay = tasksOnDay.filter((t) => t.isCompleted).length;
     dailyDistribution.push({
       day: d,
+      dateStr: dayDateStr,
       total: tasksOnDay.length,
-      completed: doneOnDay
+      completed: doneOnDay,
+      tasks: tasksOnDay
     });
   }
 
@@ -599,16 +602,20 @@ export const MonthlyAnalyticsModal: React.FC<MonthlyAnalyticsModalProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-7 sm:grid-cols-10 md:grid-cols-16 gap-1 pt-2">
-              {dailyDistribution.map((item) => {
+            <div className="grid grid-cols-7 sm:grid-cols-10 md:grid-cols-16 gap-1 pt-2 relative">
+              {dailyDistribution.map((item, idx) => {
                 const hasTasks = item.total > 0;
                 const allDone = hasTasks && item.completed === item.total;
                 const someDone = hasTasks && item.completed > 0 && !allDone;
+                const isDayHovered = hoveredDay === item.day;
+                const colMod = idx % 7;
 
                 return (
                   <div
                     key={item.day}
-                    className={`p-2 rounded-xl text-center border transition-all ${
+                    onMouseEnter={() => setHoveredDay(item.day)}
+                    onMouseLeave={() => setHoveredDay((prev) => (prev === item.day ? null : prev))}
+                    className={`relative p-2 rounded-xl text-center border transition-all cursor-pointer ${
                       allDone
                         ? "bg-emerald-50 border-emerald-300 text-emerald-900 font-bold"
                         : someDone
@@ -616,13 +623,81 @@ export const MonthlyAnalyticsModal: React.FC<MonthlyAnalyticsModalProps> = ({
                         : hasTasks
                         ? "bg-blue-50 border-blue-200 text-blue-900 font-bold"
                         : "bg-slate-50/70 border-slate-100 text-slate-400"
-                    }`}
-                    title={`${item.day}-${monthName}: Jami ${item.total} ta, Bajarildi ${item.completed} ta`}
+                    } ${isDayHovered ? "ring-2 ring-indigo-500 z-30 shadow-md" : ""}`}
                   >
                     <div className="text-[10px] text-slate-500">{item.day}</div>
                     <div className="text-xs font-extrabold mt-0.5">
                       {item.total > 0 ? `${item.completed}/${item.total}` : "-"}
                     </div>
+
+                    {/* Hover Preview Popover */}
+                    {isDayHovered && (
+                      <div
+                        className={`absolute bottom-full mb-2 w-72 bg-white rounded-2xl border border-slate-200 shadow-2xl z-50 text-left overflow-hidden pointer-events-none ${
+                          colMod <= 1
+                            ? "left-0"
+                            : colMod >= 5
+                            ? "right-0"
+                            : "left-1/2 -translate-x-1/2"
+                        }`}
+                      >
+                        <div className="px-3 py-2 bg-slate-900 text-white flex items-center justify-between">
+                          <span className="text-xs font-bold">
+                            {item.day}-{monthName}, {selectedYear}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white/15 text-white">
+                            {item.completed}/{item.total} bajarildi
+                          </span>
+                        </div>
+
+                        {item.tasks.length === 0 ? (
+                          <div className="p-3 text-center text-xs text-slate-400 font-medium">
+                            Ushbu kunda vazifalar yo'q
+                          </div>
+                        ) : (
+                          <div className="p-2 space-y-1.5 max-h-56 overflow-y-auto divide-y divide-slate-100">
+                            {item.tasks.map((t) => (
+                              <div key={t.id} className="pt-1.5 first:pt-0 flex items-start justify-between gap-2">
+                                <div className="flex items-start space-x-1.5 min-w-0">
+                                  {t.isCompleted ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                                  ) : (
+                                    <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div
+                                      className={`text-[11px] font-bold leading-snug break-words ${
+                                        t.isCompleted ? "line-through text-slate-400" : "text-slate-800"
+                                      }`}
+                                    >
+                                      {t.title}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                      <span>{t.priority}</span>
+                                      {t.dueTime && <span>• {t.dueTime}</span>}
+                                      {!t.isCompleted && (t.autoRolledCount || 0) > 0 && (
+                                        <span className="text-rose-600 font-bold">
+                                          • {t.autoRolledCount}x kechikkan
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                                <span
+                                  className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                    t.isCompleted
+                                      ? "bg-emerald-50 text-emerald-700"
+                                      : "bg-amber-50 text-amber-700"
+                                  }`}
+                                >
+                                  {t.isCompleted ? "Bajarildi" : "Rejada"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
