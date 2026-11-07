@@ -3,18 +3,13 @@ import { Task } from "../types";
 import {
   getTodayString,
   formatDateUz,
-  formatCreatedAtUz,
-  formatTaskScheduleDisplay,
   getTaskOverdueRolloverInfo,
 } from "../services/storage";
-import { getPriorityBadge } from "./TaskCard";
+import { TaskCard, getPriorityBadge } from "./TaskCard";
 import { HourlyTimeline } from "./HourlyTimeline";
 import { DayWorkloadAnalytics } from "./DayWorkloadAnalytics";
 import {
   calculateDayWorkload,
-  DAILY_WORK_HOURS,
-  DAILY_WORK_MINUTES,
-  getTaskEstimatedMinutes,
   formatMinutesUz,
 } from "../services/workload";
 import {
@@ -22,18 +17,13 @@ import {
   ChevronRight,
   Calendar as CalendarIcon,
   Plus,
-  Clock,
   CheckCircle2,
   AlertTriangle,
   Flame,
   CalendarDays,
-  Percent,
-  TrendingUp,
   Activity,
-  Check,
-  CalendarClock,
-  Edit2,
-  CalendarPlus,
+  ArrowUp,
+  ListChecks,
 } from "lucide-react";
 
 interface TaskCalendarViewProps {
@@ -73,24 +63,36 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
   const [currentYear, setCurrentYear] = useState<number>(() => new Date().getFullYear());
   const [currentMonth, setCurrentMonth] = useState<number>(() => new Date().getMonth()); // 0 - 11
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
-  const [hoveredDate, setHoveredDate] = useState<string | null>(null);
-  const hoverCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleCellMouseEnter = (dateStr: string) => {
-    if (hoverCloseTimeoutRef.current) {
-      clearTimeout(hoverCloseTimeoutRef.current);
-      hoverCloseTimeoutRef.current = null;
+  const calendarTopRef = useRef<HTMLDivElement | null>(null);
+  const selectedDayTasksRef = useRef<HTMLDivElement | null>(null);
+
+  const handleSelectDay = (dateStr: string) => {
+    setSelectedDate(dateStr);
+    // Parse year/month if user clicked a trailing/leading day from adjacent month
+    const [y, m] = dateStr.split("-").map(Number);
+    if (y && m) {
+      if (y !== currentYear) setCurrentYear(y);
+      if (m - 1 !== currentMonth) setCurrentMonth(m - 1);
     }
-    setHoveredDate(dateStr);
+    setTimeout(() => {
+      selectedDayTasksRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 60);
   };
 
-  const handleCellMouseLeave = () => {
-    if (hoverCloseTimeoutRef.current) {
-      clearTimeout(hoverCloseTimeoutRef.current);
-    }
-    hoverCloseTimeoutRef.current = setTimeout(() => {
-      setHoveredDate(null);
-    }, 130);
+  const handleShiftSelectedDay = (offsetDays: number) => {
+    const [y, m, d] = selectedDate.split("-").map(Number);
+    const dt = new Date(y, m - 1, d + offsetDays);
+    const nextY = dt.getFullYear();
+    const nextM = dt.getMonth();
+    const nextD = dt.getDate();
+    const nextDateStr = `${nextY}-${String(nextM + 1).padStart(2, "0")}-${String(nextD).padStart(2, "0")}`;
+    setSelectedDate(nextDateStr);
+    if (nextY !== currentYear) setCurrentYear(nextY);
+    if (nextM !== currentMonth) setCurrentMonth(nextM);
   };
 
   const handlePrevMonth = () => {
@@ -127,7 +129,6 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
   // Pre-calculate workload map for performance
   const workloadByDate = useMemo(() => {
     const map: Record<string, ReturnType<typeof calculateDayWorkload>> = {};
-    // Collect all relevant dates
     tasks.forEach((t) => {
       if (t.dueDate && !map[t.dueDate]) {
         map[t.dueDate] = calculateDayWorkload(t.dueDate, tasks);
@@ -204,12 +205,29 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
     }
   }
 
+  // Selected day tasks sorted by completion status and time
+  const selectedDayTasks = useMemo(() => {
+    return tasks
+      .filter((t) => t.dueDate === selectedDate)
+      .sort((a, b) => {
+        if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
+        return (a.dueTime || "23:59").localeCompare(b.dueTime || "23:59");
+      });
+  }, [tasks, selectedDate]);
+
+  const selectedDayCompletedCount = selectedDayTasks.filter((t) => t.isCompleted).length;
+  const selectedDayPendingCount = selectedDayTasks.length - selectedDayCompletedCount;
+  const selectedDayRolledCount = selectedDayTasks.filter(
+    (t) => !t.isCompleted && Boolean(getTaskOverdueRolloverInfo(t))
+  ).length;
+  const selectedDayWorkload = getDayWorkload(selectedDate);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" ref={calendarTopRef}>
       {/* 1. Main Calendar Header & Month Navigation */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm relative">
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
         {/* Top Control Bar */}
-        <div className="p-4 sm:p-5 rounded-t-2xl bg-gradient-to-r from-blue-50/50 via-indigo-50/30 to-white border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-blue-50/50 via-indigo-50/30 to-white border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-md shadow-blue-500/20">
               <CalendarDays className="w-5 h-5 stroke-[2.2]" />
@@ -222,7 +240,7 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-slate-500">
-                1 kunlik ish me'yori: <strong>8 soat</strong> • Kunlik yuklama foizi va vazifalar tahlili
+                Istalgan kun ustiga bosing — o'sha kundagi barcha vazifalar pastda to'liq ko'rinishda ochiladi
               </p>
             </div>
           </div>
@@ -311,33 +329,16 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
         </div>
 
         {/* Days Grid */}
-        <div className="grid grid-cols-7 divide-x divide-y divide-slate-200/70 border-b border-slate-200/70 bg-slate-100/40 rounded-b-2xl">
-          {calendarCells.map((cell, cellIdx) => {
+        <div className="grid grid-cols-7 divide-x divide-y divide-slate-200/70 border-b border-slate-200/70 bg-slate-100/40">
+          {calendarCells.map((cell) => {
             const hasTasks = cell.tasksOnDay.length > 0;
-            const completedCount = cell.tasksOnDay.filter((t) => t.isCompleted).length;
             const pendingTasks = cell.tasksOnDay.filter((t) => !t.isCompleted);
             const isPastOverdue = cell.dateStr < todayStr && pendingTasks.length > 0;
             const hasTaxTask = cell.tasksOnDay.some((t) => t.priority.includes("Soliq") && !t.isCompleted);
             const workload = cell.workload;
             const percent = workload.workloadPercent;
-            const isHovered = hoveredDate === cell.dateStr;
 
-            const colIdx = cellIdx % 7; // 0 (Mon) .. 6 (Sun)
-            const rowIdx = Math.floor(cellIdx / 7);
-
-            // Smart horizontal positioning so the hover card never overflows left or right
-            const popoverHorizontalClass =
-              colIdx <= 1
-                ? "left-0"
-                : colIdx >= 5
-                ? "right-0"
-                : "left-1/2 -translate-x-1/2";
-
-            // Smart vertical positioning so bottom rows open upward and top rows open downward
-            const popoverVerticalClass =
-              rowIdx >= 3 ? "bottom-full mb-2" : "top-full mt-2";
-
-            // Sort tasks by dueTime and completion state for clean display
+            // Sort tasks by dueTime and completion state
             const sortedDayTasks = [...cell.tasksOnDay].sort((a, b) => {
               if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
               return (a.dueTime || "23:59").localeCompare(b.dueTime || "23:59");
@@ -367,18 +368,14 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
             return (
               <div
                 key={cell.dateStr}
-                onClick={() => setSelectedDate(cell.dateStr)}
-                onMouseEnter={() => handleCellMouseEnter(cell.dateStr)}
-                onMouseLeave={handleCellMouseLeave}
-                className={`relative min-h-[96px] sm:min-h-[118px] p-1.5 sm:p-2 transition-all cursor-pointer flex flex-col justify-between ${
-                  isHovered ? "z-40 ring-2 ring-blue-500/70 bg-blue-50/40" : ""
-                } ${
+                onClick={() => handleSelectDay(cell.dateStr)}
+                className={`relative min-h-[104px] sm:min-h-[126px] p-1.5 sm:p-2 transition-all cursor-pointer flex flex-col justify-between ${
                   cell.isSelected
-                    ? "bg-blue-50/90 ring-2 ring-blue-600 z-20 shadow-xs"
+                    ? "bg-blue-50/90 ring-2 ring-inset ring-blue-600 z-10 shadow-xs"
                     : cell.isToday
-                    ? "bg-amber-50/50"
+                    ? "bg-amber-50/50 hover:bg-amber-50/80"
                     : cell.isCurrentMonth
-                    ? "bg-white hover:bg-slate-50"
+                    ? "bg-white hover:bg-blue-50/30"
                     : "bg-slate-50/70 text-slate-400 hover:bg-slate-100/70"
                 }`}
               >
@@ -451,7 +448,7 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
 
                 {/* Day's task pills */}
                 <div className="space-y-1 flex-1 overflow-hidden">
-                  {sortedDayTasks.slice(0, 2).map((t) => {
+                  {sortedDayTasks.slice(0, 3).map((t) => {
                     const badge = getPriorityBadge(t.priority);
                     const rollover = getTaskOverdueRolloverInfo(t);
                     return (
@@ -478,17 +475,17 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
                     );
                   })}
 
-                  {cell.tasksOnDay.length > 2 && (
+                  {cell.tasksOnDay.length > 3 && (
                     <div className="text-[10px] font-bold text-blue-600 pl-1 tabular-nums">
-                      +{cell.tasksOnDay.length - 2} ta yana (ko'rish uchun ustiga boring)
+                      +{cell.tasksOnDay.length - 3} ta vazifa (barchasini ko'rish)
                     </div>
                   )}
                 </div>
 
                 {/* Cell Footer: Task count + Add Button */}
                 <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-100/80">
-                  <span className="text-[10px] font-medium text-slate-400 tabular-nums">
-                    {hasTasks ? `${cell.tasksOnDay.length} vazifa` : ""}
+                  <span className="text-[10px] font-semibold text-slate-500 tabular-nums">
+                    {hasTasks ? `${cell.tasksOnDay.length} ta vazifa` : ""}
                   </span>
                   <button
                     type="button"
@@ -502,255 +499,153 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
                     <Plus className="w-3 h-3" />
                   </button>
                 </div>
-
-                {/* HOVER PREVIEW POPOVER: Kun ustiga borilganda shu kundagi barcha vazifalar ro'yxati */}
-                {isHovered && (
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseEnter={() => handleCellMouseEnter(cell.dateStr)}
-                    onMouseLeave={handleCellMouseLeave}
-                    className={`hidden sm:block absolute ${popoverHorizontalClass} ${popoverVerticalClass} z-50 w-80 sm:w-96 bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden cursor-default`}
-                  >
-                    {/* Popover Header */}
-                    <div className="p-3 bg-slate-900 text-white flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <CalendarIcon className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                          <span className="text-xs font-extrabold tracking-tight truncate">
-                            {formatDateUz(cell.dateStr)}
-                          </span>
-                          {cell.isToday && (
-                            <span className="text-[10px] font-bold text-blue-300">
-                              · Bugun
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-300 mt-0.5 tabular-nums">
-                          <span>Jami: <strong className="text-white">{cell.tasksOnDay.length} ta</strong></span>
-                          <span>·</span>
-                          <span className="text-emerald-300">✓ {completedCount}</span>
-                          <span>·</span>
-                          <span className="text-amber-300">⏳ {pendingTasks.length}</span>
-                        </div>
-                      </div>
-
-                      <div className="text-right shrink-0 tabular-nums">
-                        <div className="text-xs font-black text-white">
-                          {percent}% yuklama
-                        </div>
-                        <div className="text-[10px] text-slate-300">
-                          {formatMinutesUz(workload.totalMinutes)} / 8 soat
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Popover Body: Tasks List */}
-                    {sortedDayTasks.length === 0 ? (
-                      <div className="p-4 text-center space-y-2">
-                        <p className="text-xs text-slate-500 font-medium">
-                          Ushbu kunga vazifalar kiritilmagan
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHoveredDate(null);
-                            onOpenNewTask(cell.dateStr);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors cursor-pointer"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Vazifa qo'shish</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                        {sortedDayTasks.map((t, idx) => {
-                          const badge = getPriorityBadge(t.priority);
-                          const rollover = getTaskOverdueRolloverInfo(t);
-                          const scheduleInfo = formatTaskScheduleDisplay(t);
-                          const estMins = getTaskEstimatedMinutes(t);
-                          const totalSteps = t.steps?.length || 0;
-                          const doneSteps = t.steps?.filter((s) => s.completed).length || 0;
-
-                          return (
-                            <div
-                              key={t.id}
-                              className={`p-3 transition-colors ${
-                                t.isCompleted
-                                  ? "bg-emerald-50/40 hover:bg-emerald-50/70"
-                                  : rollover
-                                  ? "bg-amber-50/50 hover:bg-amber-50/80"
-                                  : "bg-white hover:bg-slate-50"
-                              }`}
-                            >
-                              {/* Title & Status */}
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex items-start gap-1.5 min-w-0">
-                                  <span className="text-xs font-bold text-slate-400 tabular-nums shrink-0 mt-0.5">
-                                    {idx + 1}.
-                                  </span>
-                                  <div className="min-w-0">
-                                    <div
-                                      className={`text-xs font-bold leading-snug break-words ${
-                                        t.isCompleted
-                                          ? "line-through text-slate-500"
-                                          : "text-slate-900"
-                                      }`}
-                                    >
-                                      {t.title}
-                                    </div>
-                                    {/* Metadata line */}
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 mt-1 tabular-nums">
-                                      <span className="font-semibold text-slate-700">
-                                        {t.dueTime || "Soat yo'q"}
-                                      </span>
-                                      <span>·</span>
-                                      <span>{formatMinutesUz(estMins)}</span>
-                                      <span>·</span>
-                                      <span>{scheduleInfo.shortTag}</span>
-                                      <span>·</span>
-                                      <span className="font-medium text-slate-700">{badge.label}</span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Status indicator */}
-                                <div className="shrink-0">
-                                  {t.isCompleted ? (
-                                    <span className="inline-flex items-center text-[10px] font-bold text-emerald-700">
-                                      <CheckCircle2 className="w-3.5 h-3.5 mr-0.5 text-emerald-600" />
-                                      Bajarildi
-                                    </span>
-                                  ) : rollover ? (
-                                    <span className="inline-flex items-center text-[10px] font-extrabold text-amber-800 tabular-nums">
-                                      <AlertTriangle className="w-3 h-3 mr-0.5 text-amber-600" />
-                                      {rollover.timesRolled}x kechikkan
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center text-[10px] font-semibold text-blue-700">
-                                      Rejada
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Rollover notice if delayed */}
-                              {rollover && !t.isCompleted && (
-                                <div className="mt-1.5 text-[10px] font-semibold text-amber-800 bg-amber-100/70 px-2 py-1 rounded-md">
-                                  ⚠️ Oldingi kundan bajarilmay o'tgan ({rollover.timesRolled}-marta kechikish)
-                                </div>
-                              )}
-
-                              {/* Steps preview if present */}
-                              {totalSteps > 0 && (
-                                <div className="mt-1.5 pl-4 space-y-0.5">
-                                  <div className="text-[10px] font-semibold text-slate-500 tabular-nums">
-                                    Amallar ({doneSteps}/{totalSteps}):
-                                  </div>
-                                  {t.steps.slice(0, 3).map((s) => (
-                                    <div
-                                      key={s.id}
-                                      className={`text-[10px] flex items-center gap-1 truncate ${
-                                        s.completed ? "text-emerald-700 line-through" : "text-slate-600"
-                                      }`}
-                                    >
-                                      <span>{s.completed ? "✓" : "•"}</span>
-                                      <span className="truncate">{s.text}</span>
-                                    </div>
-                                  ))}
-                                  {totalSteps > 3 && (
-                                    <div className="text-[10px] text-slate-400">
-                                      +{totalSteps - 3} ta amal...
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Bottom row: CreatedAt + Quick Actions */}
-                              <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                                <span className="text-[10px] text-slate-400 flex items-center truncate tabular-nums">
-                                  <CalendarPlus className="w-2.5 h-2.5 mr-1 shrink-0" />
-                                  {formatCreatedAtUz(t.createdAt, t.id)}
-                                </span>
-
-                                <div className="flex items-center gap-1 shrink-0">
-                                  {!t.isCompleted && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setHoveredDate(null);
-                                        onOpenCompleteModal(t);
-                                      }}
-                                      className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold flex items-center gap-0.5 transition-colors cursor-pointer"
-                                      title="Bajarildi deb belgilash"
-                                    >
-                                      <Check className="w-2.5 h-2.5" />
-                                      <span>Bajarildi</span>
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setHoveredDate(null);
-                                      onOpenDateReschedule(t);
-                                    }}
-                                    className="p-1 rounded hover:bg-amber-100 text-amber-700 transition-colors cursor-pointer"
-                                    title="Boshqa kunga ko'chirish"
-                                  >
-                                    <CalendarClock className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setHoveredDate(null);
-                                      onEditTask(t);
-                                    }}
-                                    className="p-1 rounded hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                                    title="Tahrirlash"
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Popover Footer */}
-                    <div className="p-2 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedDate(cell.dateStr);
-                          setHoveredDate(null);
-                        }}
-                        className="text-[11px] font-bold text-slate-700 hover:text-blue-600 px-2 py-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-                      >
-                        Kun jadvalini ochish
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setHoveredDate(null);
-                          onOpenNewTask(cell.dateStr);
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold transition-colors cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Vazifa qo'shish</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* 2. Tanlangan kun uchun maxsus 8 soatlik Yuklama va Amallar Tahlili Paneli */}
+      {/* 2. TANLANGAN KUN VAZIFALARI — TO'LIQ KO'RINISH (Kunga bosilganda to'liq chiqadigan asosiy blok) */}
+      <div
+        ref={selectedDayTasksRef}
+        className="bg-white rounded-2xl border-2 border-blue-200/90 shadow-sm overflow-hidden scroll-mt-4"
+      >
+        {/* Selected Day Header Bar */}
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center space-x-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-blue-600/30 border border-blue-400/40 text-blue-200 flex items-center justify-center shrink-0">
+              <ListChecks className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base sm:text-xl font-black tracking-tight text-white">
+                  {formatDateUz(selectedDate)} — Kunlik Vazifalar Ro'yxati
+                </h3>
+                {selectedDate === todayStr && (
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-blue-500 text-white">
+                    Bugun
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300 mt-1 tabular-nums">
+                <span>
+                  Jami vazifalar: <strong className="text-white">{selectedDayTasks.length} ta</strong>
+                </span>
+                <span>•</span>
+                <span className="text-emerald-300 font-semibold">
+                  Bajarildi: {selectedDayCompletedCount} ta
+                </span>
+                <span>•</span>
+                <span className="text-amber-300 font-semibold">
+                  Kutilmoqda: {selectedDayPendingCount} ta
+                </span>
+                {selectedDayRolledCount > 0 && (
+                  <>
+                    <span>•</span>
+                    <span className="text-orange-300 font-bold">
+                      ⚠️ Kechikib o'tgan: {selectedDayRolledCount} ta
+                    </span>
+                  </>
+                )}
+                <span>•</span>
+                <span className="text-blue-200 font-semibold">
+                  Ish yuklamasi: {selectedDayWorkload.workloadPercent}% ({formatMinutesUz(selectedDayWorkload.totalMinutes)})
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Day Navigation & Actions */}
+          <div className="flex flex-wrap items-center gap-2 self-end lg:self-center">
+            <div className="flex items-center rounded-xl bg-white/10 border border-white/15 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => handleShiftSelectedDay(-1)}
+                className="px-2.5 py-1.5 text-xs font-bold text-white hover:bg-white/15 flex items-center gap-1 transition-colors cursor-pointer"
+                title="Oldingi kun"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Oldingi kun</span>
+              </button>
+              <div className="w-px h-4 bg-white/20" />
+              <button
+                type="button"
+                onClick={() => handleShiftSelectedDay(1)}
+                className="px-2.5 py-1.5 text-xs font-bold text-white hover:bg-white/15 flex items-center gap-1 transition-colors cursor-pointer"
+                title="Keyingi kun"
+              >
+                <span>Keyingi kun</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onOpenNewTask(selectedDate)}
+              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Shu kunga vazifa qo'shish</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                calendarTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+              className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold border border-white/15 flex items-center gap-1 transition-colors cursor-pointer"
+              title="Kalendar jadvaliga qaytish"
+            >
+              <ArrowUp className="w-3.5 h-3.5" />
+              <span>Kalendarga</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Full Tasks Cards List for Selected Date */}
+        <div className="p-4 sm:p-6 bg-slate-50/60">
+          {selectedDayTasks.length === 0 ? (
+            <div className="py-12 px-4 text-center bg-white rounded-2xl border border-dashed border-slate-300 space-y-3">
+              <CalendarIcon className="w-10 h-10 text-slate-300 mx-auto" />
+              <div>
+                <h4 className="text-sm sm:text-base font-bold text-slate-800">
+                  {formatDateUz(selectedDate)} sanasiga vazifalar kiritilmagan
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  Ushbu kunga yangi vazifa qo'shish uchun quyidagi tugmani bosing
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenNewTask(selectedDate)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Vazifa qo'shish</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+              {selectedDayTasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onToggleStep={(taskId, stepId) =>
+                    onToggleStep && onToggleStep(taskId, stepId)
+                  }
+                  onOpenCompleteModal={onOpenCompleteModal}
+                  onOpenRescheduleModal={onOpenDateReschedule}
+                  onOpenHourReschedule={onOpenHourReschedule}
+                  onEditTask={onEditTask}
+                  onDeleteTask={onDeleteTask}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 3. Tanlangan kun uchun maxsus 8 soatlik Yuklama va Amallar Tahlili Paneli */}
       <DayWorkloadAnalytics
         date={selectedDate}
         tasks={tasks}
@@ -759,7 +654,7 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
         onOpenHourReschedule={onOpenHourReschedule}
       />
 
-      {/* 3. Tanlangan kun uchun Interaktiv Soatlar Jadvali */}
+      {/* 4. Tanlangan kun uchun Interaktiv Soatlar Jadvali */}
       <HourlyTimeline
         date={selectedDate}
         tasks={tasks}
